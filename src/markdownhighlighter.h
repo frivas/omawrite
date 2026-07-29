@@ -21,6 +21,10 @@ public:
 
     enum class InlineKind { Bold, Italic, Link };
 
+    // Carried from block to block so a fenced run of code knows it is inside
+    // one. Stored on the block, which is where Backend::hiddenRangesAt reads it.
+    enum BlockState { Prose = 0, InsideFence = 1 };
+
     struct InlineMarkup {
         InlineKind kind;
         Span content;
@@ -40,6 +44,7 @@ protected:
 
 private:
     void rebuildFormats();
+    static bool isFence(const QString &text);
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
@@ -54,6 +59,7 @@ private:
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;
     QTextCharFormat m_codeFormat;
+    QTextCharFormat m_fenceFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QString m_searchQuery;

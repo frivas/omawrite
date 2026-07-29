@@ -87,6 +87,10 @@ void MarkdownHighlighter::rebuildFormats() {
     m_codeFormat.setForeground(text);
     m_codeFormat.setBackground(codeBackground);
 
+    // A fence recedes the way a heading's `#` does, over the panel it opens.
+    m_fenceFormat = m_codeFormat;
+    m_fenceFormat.setForeground(marker);
+
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
     m_quoteFormat.setFontItalic(true);
@@ -104,6 +108,19 @@ void MarkdownHighlighter::rebuildFormats() {
 }
 
 void MarkdownHighlighter::highlightBlock(const QString &text) {
+    // A fenced run of code is literal from its opening fence through its
+    // closing one, so no markup runs inside it. The state rides from block to
+    // block, and Qt rehighlights the rest of the document when it changes.
+    const bool fence = isFence(text);
+    const bool insideFence = previousBlockState() == InsideFence;
+    setCurrentBlockState(fence == insideFence ? Prose : InsideFence);
+
+    if (fence || insideFence) {
+        setFormat(0, text.length(), fence ? m_fenceFormat : m_codeFormat);
+        highlightSearch(text);
+        return;
+    }
+
     if (!text.isEmpty()) {
         highlightMarkers(text);
         if (text.contains(QLatin1Char('`')) || text.contains(QLatin1Char('*'))
@@ -112,6 +129,11 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         }
     }
     highlightSearch(text);
+}
+
+bool MarkdownHighlighter::isFence(const QString &text) {
+    static const QRegularExpression fenceRe(QStringLiteral("^\\s*```"));
+    return text.contains(QLatin1Char('`')) && fenceRe.match(text).hasMatch();
 }
 
 void MarkdownHighlighter::highlightSearch(const QString &text) {

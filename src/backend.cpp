@@ -371,6 +371,10 @@ QVariantList Backend::hiddenRangesAt(int position) const {
     if (!block.isValid())
         return ranges;
 
+    // The highlighter leaves fenced code alone, so it hides nothing there.
+    if (block.userState() == MarkdownHighlighter::InsideFence)
+        return ranges;
+
     const int lineStart = block.position();
     QList<QPair<int, int>> spans;
     const QList<MarkdownHighlighter::InlineMarkup> markup =

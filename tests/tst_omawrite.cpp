@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QFont>
+#include <QTextDocument>
+#include <QTextLayout>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -96,6 +98,45 @@ private slots:
         QCOMPARE(emphasis.at(1).content.start, 1);
         QCOMPARE(emphasis.at(1).content.length, 6);
         QCOMPARE(emphasis.at(2).content.length, 4);
+    }
+
+    void leavesFencedCodeLiteral() {
+        QTextDocument document;
+        document.setPlainText(QStringLiteral("prose _italic_\n"
+                                            "```ruby\n"
+                                            "snake_case_name = *value*\n"
+                                            "```\n"
+                                            "after _italic_\n"));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.rehighlight();
+
+        const auto stateOf = [&document](int blockNumber) {
+            return document.findBlockByNumber(blockNumber).userState();
+        };
+        QCOMPARE(stateOf(0), int(MarkdownHighlighter::Prose));
+        QCOMPARE(stateOf(1), int(MarkdownHighlighter::InsideFence));
+        QCOMPARE(stateOf(2), int(MarkdownHighlighter::InsideFence));
+        QCOMPARE(stateOf(3), int(MarkdownHighlighter::Prose));
+        QCOMPARE(stateOf(4), int(MarkdownHighlighter::Prose));
+
+        // The fenced line sits on the code panel, with nothing italic and no
+        // marker hidden.
+        const QList<QTextLayout::FormatRange> fenced =
+            document.findBlockByNumber(2).layout()->formats();
+        QCOMPARE(fenced.size(), 1);
+        QCOMPARE(fenced.constFirst().length, document.findBlockByNumber(2).text().length());
+        QVERIFY(fenced.constFirst().format.background().style() != Qt::NoBrush);
+        for (const QTextLayout::FormatRange &range : fenced) {
+            QVERIFY(!range.format.fontItalic());
+            QVERIFY(range.format.foreground().color() != range.format.background().color());
+        }
+
+        const QList<QTextLayout::FormatRange> prose =
+            document.findBlockByNumber(4).layout()->formats();
+        QVERIFY(std::any_of(prose.cbegin(), prose.cend(),
+                            [](const QTextLayout::FormatRange &range) {
+                                return range.format.fontItalic();
+                            }));
     }
 
     void loadsCurrentOmarchyTheme() {
