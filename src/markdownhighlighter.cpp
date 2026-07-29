@@ -20,14 +20,15 @@ void MarkdownHighlighter::setDarkMode(bool darkMode) {
 }
 
 void MarkdownHighlighter::setColors(const QString &background, const QString &foreground,
-                                    const QString &accent) {
+                                    const QString &accent, const QString &codeBackground) {
     if (m_customBackground == background && m_customForeground == foreground
-            && m_customAccent == accent)
+            && m_customAccent == accent && m_customCodeBackground == codeBackground)
         return;
 
     m_customBackground = background;
     m_customForeground = foreground;
     m_customAccent = accent;
+    m_customCodeBackground = codeBackground;
     rebuildFormats();
     rehighlight();
 }
@@ -50,8 +51,9 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
-    const QColor codeBackground = m_darkMode ? QColor(QStringLiteral("#1c1a1a"))
-                                             : QColor(QStringLiteral("#f8f8f8"));
+    const QColor codeBackground = !m_customCodeBackground.isEmpty()
+        ? QColor(m_customCodeBackground)
+        : (m_darkMode ? QColor(QStringLiteral("#1c1a1a")) : QColor(QStringLiteral("#f8f8f8")));
 
     m_markerFormat = QTextCharFormat();
     m_markerFormat.setForeground(marker);

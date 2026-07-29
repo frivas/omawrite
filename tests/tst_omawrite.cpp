@@ -139,6 +139,60 @@ private slots:
                             }));
     }
 
+    void takesTheCodePanelFromTheTheme() {
+        QTemporaryDir homeDirectory;
+        QVERIFY(homeDirectory.isValid());
+
+        const QByteArray originalHome = qgetenv("HOME");
+        struct HomeRestorer {
+            QByteArray value;
+            ~HomeRestorer() { qputenv("HOME", value); }
+        } restoreHome{originalHome};
+        QVERIFY(qputenv("HOME", homeDirectory.path().toUtf8()));
+
+        const QString themeDirectory = homeDirectory.path()
+            + QStringLiteral("/.local/state/omarchy/current/theme");
+        QVERIFY(QDir().mkpath(themeDirectory));
+
+        const auto codePanelFor = [&themeDirectory](const QByteArray &palette) {
+            QFile colorsFile(themeDirectory + QStringLiteral("/colors.toml"));
+            if (!colorsFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+                return QColor();
+            colorsFile.write(palette);
+            colorsFile.close();
+            return QColor(Backend().themeCodeBackground());
+        };
+
+        // The shade the theme names for panels wins.
+        QCOMPARE(codePanelFor("mode = \"dark\"\n"
+                              "background = \"#111c18\"\n"
+                              "foreground = \"#c1c497\"\n"
+                              "lighter_background = \"#23372b\"\n"),
+                 QColor(QStringLiteral("#23372b")));
+
+        // Themes naming none leave code on a shade mixed from the page: a
+        // little off the background, and nowhere near the text.
+        const QColor mixedDark = codePanelFor("mode = \"dark\"\n"
+                                              "background = \"#000000\"\n"
+                                              "foreground = \"#ffffff\"\n");
+        QVERIFY(mixedDark != QColor(Qt::black));
+        QVERIFY(mixedDark.lightness() < 60);
+
+        const QColor mixedLight = codePanelFor("mode = \"light\"\n"
+                                               "background = \"#ffffff\"\n"
+                                               "foreground = \"#000000\"\n");
+        QVERIFY(mixedLight != QColor(Qt::white));
+        QVERIFY(mixedLight.lightness() > 195);
+
+        // A theme whose lighter background is the page itself would leave code
+        // with no panel at all, so it falls back to the mix as well.
+        QVERIFY(codePanelFor("mode = \"dark\"\n"
+                             "background = \"#0c0b0c\"\n"
+                             "foreground = \"#fafcfb\"\n"
+                             "lighter_background = \"#0c0b0c\"\n")
+                != QColor(QStringLiteral("#0c0b0c")));
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
