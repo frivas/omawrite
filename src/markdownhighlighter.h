@@ -32,6 +32,9 @@ public:
     // Backend::hiddenRangesAt) to skip the caret over the hidden markers.
     static QList<InlineMarkup> inlineMarkup(const QString &text);
 
+    // Inline code spans, backticks included.
+    static QList<Span> codeSpans(const QString &text);
+
 protected:
     void highlightBlock(const QString &text) override;
 
