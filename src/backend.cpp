@@ -114,6 +114,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     }
                 }
 
+                if (!deleted)
+                    m_hasKnownFileContents = false;
                 emit externalChangeDetected(deleted, m_modified);
             });
 
@@ -355,9 +357,25 @@ bool Backend::editorTextChanged() {
     }
 
     scheduleWordCount();
-    setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
-    scheduleRecovery();
+
+    const QString baseline = m_hasKnownFileContents
+        ? QString::fromUtf8(m_lastKnownFileContents)
+              .replace(QStringLiteral("\r\n"), QStringLiteral("\n"))
+        : QString();
+
+    if (text == baseline) {
+        setModified(false);
+        clearRecovery();
+        if (m_hasKnownFileContents)
+            setStatus(QStringLiteral("Saved %1").arg(fileName()));
+        else
+            setStatus(QString());
+    } else {
+        setModified(true);
+        setStatus(QStringLiteral("Unsaved"));
+        scheduleRecovery();
+    }
+
     return true;
 }
 
