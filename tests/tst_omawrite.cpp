@@ -4,6 +4,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -190,6 +191,75 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void breaksLinesOnReturn() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QVERIFY(editor->property("activeFocus").toBool());
+
+        auto text = [&] { return editor->property("text").toString(); };
+        auto load = [&](const QString &content, int position) {
+            editor->setProperty("text", content);
+            editor->setProperty("cursorPosition", position);
+        };
+        auto returnKey = [&] { QTest::keyClick(window, Qt::Key_Return); };
+
+        // Ending a paragraph leaves the blank line that separates it from the
+        // next one.
+        load(QStringLiteral("one\n\ntwo"), 8);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo\n\n"));
+
+        // On a line that is already blank there is nothing to separate from,
+        // so Return is worth one line, not two.
+        load(QStringLiteral("one\n\ntwo"), 4);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\ntwo"));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\n\ntwo"));
+
+        // An empty document is a blank line too.
+        load(QString(), 0);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+
+        // Whitespace left behind on a line still reads as blank.
+        load(QStringLiteral("one\n  \ntwo"), 5);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n \n \ntwo"));
+
+        // A list carries its marker down, and an item left empty drops the
+        // marker to end the list.
+        load(QStringLiteral("- item"), 6);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- item\n- "));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- item\n\n"));
+
+        // Inside a code fence every line is its own, blank ones included.
+        load(QStringLiteral("```\ncode\n```"), 8);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("```\ncode\n\n```"));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("```\ncode\n\n\n```"));
     }
 
     void scalesTextWithDesktopTextSize() {

@@ -624,6 +624,17 @@ ApplicationWindow {
                         }
                         return;
                     }
+                    // A new paragraph stands apart from the one above it by a
+                    // blank line, which is the second break here. A line that
+                    // is already blank has nothing to stand apart from, so
+                    // that break would only be a gap nobody asked for.
+                    var lineEnd = text.indexOf("\n", cursorPosition);
+                    var rest = lineEnd < 0 ? text.slice(cursorPosition)
+                                           : text.slice(cursorPosition, lineEnd);
+                    if (/^\s*$/.test(line) && /^\s*$/.test(rest)) {
+                        replaceSelectionWith("\n");
+                        return;
+                    }
                     replaceSelectionWith("\n\n");
                 }
 
