@@ -206,6 +206,20 @@ void Backend::open(const QUrl &url) {
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
+    // A path that is not there yet is a file the writer means to start, so
+    // take the name for a blank document. The first save then lands where
+    // they said it should, instead of asking them again.
+    if (!file.exists()) {
+        loadDocumentText(QString());
+        clearRecovery();
+        m_lastKnownFileContents.clear();
+        m_hasKnownFileContents = false;
+        setFileUrl(url);
+        setModified(false);
+        setStatus(QStringLiteral("New file %1").arg(fileName()));
+        return;
+    }
+
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         setStatus(QStringLiteral("Could not open %1.").arg(targetName));
         return;

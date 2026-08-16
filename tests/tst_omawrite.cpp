@@ -162,6 +162,69 @@ private slots:
         QCOMPARE(editor->property("wrappedSelectionEnd").toInt(), 12);
     }
 
+    void startsANewFileFromAPathThatIsNotThereYet() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString newPath = directory.filePath(QStringLiteral("new_document.md"));
+        const QString existingPath = directory.filePath(QStringLiteral("already-there.md"));
+        QFile existing(existingPath);
+        QVERIFY(existing.open(QIODevice::WriteOnly | QIODevice::Text));
+        existing.write("on disk already");
+        existing.close();
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        // A name from the command line that is not on disk yet is still this
+        // document's name, blank as the document is.
+        QSignalSpy saveDialogSpy(&backend, &Backend::saveDialogRequested);
+        backend.open(QUrl::fromLocalFile(newPath));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(newPath));
+        QCOMPARE(backend.fileName(), QStringLiteral("new_document.md"));
+        QCOMPARE(backend.status(), QStringLiteral("New file new_document.md"));
+        QCOMPARE(editor->property("text").toString(), QString());
+        QVERIFY(!backend.modified());
+
+        // Opening it wrote nothing: the file appears when the writer saves.
+        QVERIFY(!QFileInfo::exists(newPath));
+
+        editor->setProperty("text", QStringLiteral("first words"));
+        QVERIFY(backend.modified());
+        backend.save();
+        QCOMPARE(saveDialogSpy.count(), 0);
+        QVERIFY(!backend.modified());
+
+        QFile written(newPath);
+        QVERIFY(written.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(written.readAll(), QByteArray("first words"));
+        written.close();
+
+        // A file that is there still opens and reads.
+        backend.open(QUrl::fromLocalFile(existingPath));
+        QCOMPARE(backend.fileName(), QStringLiteral("already-there.md"));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("on disk already"));
+
+        // A path that is there but cannot be read is still an error, and
+        // leaves the document it could not replace alone.
+        backend.open(QUrl::fromLocalFile(directory.path()));
+        QCOMPARE(backend.status(),
+                 QStringLiteral("Could not open %1.")
+                     .arg(QFileInfo(directory.path()).fileName()));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(existingPath));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("on disk already"));
+    }
+
     void savesAndOpensFromFooterButtons() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
