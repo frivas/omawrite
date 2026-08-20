@@ -210,6 +210,14 @@ void Backend::open(const QUrl &url) {
     // take the name for a blank document. The first save then lands where
     // they said it should, instead of asking them again.
     if (!file.exists()) {
+        // Only where it could be written: a name under a directory that is not
+        // there leaves the first save with nowhere to land and no dialog.
+        const QFileInfo parentDirectory(QFileInfo(url.toLocalFile()).absolutePath());
+        if (!parentDirectory.isDir() || !parentDirectory.isWritable()) {
+            setStatus(QStringLiteral("Could not open %1.").arg(targetName));
+            return;
+        }
+
         loadDocumentText(QString());
         clearRecovery();
         m_lastKnownFileContents.clear();

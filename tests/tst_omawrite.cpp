@@ -223,6 +223,14 @@ private slots:
                      .arg(QFileInfo(directory.path()).fileName()));
         QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(existingPath));
         QCOMPARE(editor->property("text").toString(), QStringLiteral("on disk already"));
+
+        // A name under a directory that is not there is not a file anyone can
+        // start, so it stays an error rather than a document that cannot save.
+        backend.open(QUrl::fromLocalFile(
+            directory.filePath(QStringLiteral("not-there/child.md"))));
+        QCOMPARE(backend.status(), QStringLiteral("Could not open child.md."));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(existingPath));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("on disk already"));
     }
 
     void savesAndOpensFromFooterButtons() {
