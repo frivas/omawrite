@@ -628,10 +628,15 @@ ApplicationWindow {
                     // blank line, which is the second break here. A line that
                     // is already blank has nothing to stand apart from, so
                     // that break would only be a gap nobody asked for.
-                    var lineEnd = text.indexOf("\n", cursorPosition);
-                    var rest = lineEnd < 0 ? text.slice(cursorPosition)
-                                           : text.slice(cursorPosition, lineEnd);
-                    if (/^\s*$/.test(line) && /^\s*$/.test(rest)) {
+                    // The break lands on what the selection leaves behind, which
+                    // is not the caret's line when it was dragged right to left.
+                    var start = Math.min(selectionStart, selectionEnd);
+                    var end = Math.max(selectionStart, selectionEnd);
+                    var head = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
+                    var lineEnd = text.indexOf("\n", end);
+                    var rest = lineEnd < 0 ? text.slice(end)
+                                           : text.slice(end, lineEnd);
+                    if (/^\s*$/.test(head) && /^\s*$/.test(rest)) {
                         replaceSelectionWith("\n");
                         return;
                     }

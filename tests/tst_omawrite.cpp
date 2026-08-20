@@ -246,6 +246,13 @@ private slots:
         returnKey();
         QCOMPARE(text(), QStringLiteral("one\n \n \ntwo"));
 
+        // A selection dragged right to left leaves the caret on the blank line
+        // it began on, but the break lands on the line it leaves behind.
+        load(QStringLiteral("one\n\ntwo"), 7);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 4));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\no"));
+
         // A list carries its marker down, and an item left empty drops the
         // marker to end the list.
         load(QStringLiteral("- item"), 6);
