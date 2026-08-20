@@ -292,6 +292,42 @@ private slots:
         QVERIFY(!backend.modified());
     }
 
+    void keepsADocumentUnsavedAfterItsFileDisappears() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        const QString path = directory.filePath(QStringLiteral("gone.md"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        QCOMPARE(file.write("hello"), qint64(5));
+        file.close();
+
+        Backend backend;
+        QQuickTextDocument *quickDocument = attachTextEdit(&backend);
+        QVERIFY(quickDocument);
+
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(!backend.modified());
+
+        QVERIFY(QFile::remove(path));
+        QTRY_COMPARE(externalChangeSpy.count(), 1);
+
+        // The writer can dismiss the dialog without picking a version, so the
+        // text the deleted file used to hold is not a saved state to return to.
+        quickDocument->textDocument()->setPlainText(QStringLiteral("hello world"));
+        QVERIFY(backend.editorTextChanged());
+        quickDocument->textDocument()->setPlainText(QStringLiteral("hello"));
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(backend.modified());
+
+        // Nor is emptying it: an empty document only reads as clean while there
+        // is no file behind it.
+        quickDocument->textDocument()->setPlainText(QString());
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(backend.modified());
+    }
+
 private:
     // Loads a bare TextEdit, attaches its document to the backend, and returns
     // the QQuickTextDocument. The engine and TextEdit are parented to the

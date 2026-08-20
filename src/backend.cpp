@@ -114,10 +114,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     }
                 }
 
-                if (!deleted) {
-                    m_hasKnownFileContents = false;
-                    m_lastKnownFileText.clear();
-                }
+                // Whatever is on disk now, it is not what we last read, so the
+                // baseline is unknown until the writer picks a version. A
+                // deletion counts: the old text is not saved anywhere either.
+                setKnownFileContents(QByteArray(), false);
                 emit externalChangeDetected(deleted, m_modified);
             });
 
@@ -358,8 +358,13 @@ bool Backend::editorTextChanged() {
     scheduleWordCount();
 
     const QString &baseline = m_lastKnownFileText;
+    // An empty baseline means a pristine untitled document, but only when there
+    // is no file behind it. Once there is one, an unknown baseline is unknown
+    // rather than empty, and emptying the editor is a change like any other.
+    const bool baselineKnown = m_hasKnownFileContents
+        || !m_fileUrl.isValid() || m_fileUrl.isEmpty();
 
-    if (text == baseline) {
+    if (baselineKnown && text == baseline) {
         setModified(false);
         clearRecovery();
         if (m_hasKnownFileContents)
