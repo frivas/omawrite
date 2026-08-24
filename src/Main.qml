@@ -742,6 +742,39 @@ ApplicationWindow {
                         return false;
 
                     var start = cursorPosition - 2;
+                    var lineEnd = text.indexOf("\n", cursorPosition);
+                    var line = lineEnd < 0 ? text.slice(cursorPosition)
+                                           : text.slice(cursorPosition, lineEnd);
+                    // Something on the caret's line and the pair above it is a
+                    // paragraph break and nothing else, either the one Return
+                    // wrote to end a paragraph or the one the writer is now
+                    // closing to join what it separates. Both breaks go.
+                    if (/^\s*$/.test(line)) {
+                        // On a blank line Return writes a single break, so up
+                        // here the pair may be that break and one that was
+                        // already in the document. Above a blank line Return
+                        // writes a single break too, and so wrote neither of
+                        // these.
+                        var above = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
+                        if (/^\s*$/.test(above))
+                            return false;
+                        // Past that the two Returns leave the same text and the
+                        // same caret, and no reading of either says which was
+                        // pressed. What decides instead is that the gap is left
+                        // standing: both breaks go only while a blank line of
+                        // it survives them. The end of the document below the
+                        // caret leaves it none...
+                        if (lineEnd < 0)
+                            return false;
+                        // ...and so does the next paragraph, which the pair
+                        // would otherwise be pulled up against.
+                        var belowEnd = text.indexOf("\n", lineEnd + 1);
+                        var below = belowEnd < 0 ? text.slice(lineEnd + 1)
+                                                 : text.slice(lineEnd + 1, belowEnd);
+                        if (!/^\s*$/.test(below))
+                            return false;
+                    }
+
                     remove(start, cursorPosition);
                     cursorPosition = start;
                     return true;
