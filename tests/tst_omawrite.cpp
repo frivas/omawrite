@@ -413,6 +413,24 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("words only I have"));
         QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path));
         QVERIFY(backend.modified());
+
+        // Refusing the reload leaves this document where a new file starts:
+        // a name, nothing behind it, and a watcher that let the path go when
+        // the file did. So the same thing can happen again from here -- the
+        // pull that removed the file landing the next commit -- and the save
+        // has to ask about it just the same.
+        QFile returned(path);
+        QVERIFY(returned.open(QIODevice::WriteOnly | QIODevice::Text));
+        returned.write("came back different");
+        returned.close();
+
+        QSignalSpy appearedSpy(&backend, &Backend::externalFileAppeared);
+        backend.save();
+        QCOMPARE(appearedSpy.count(), 1);
+        QFile intact(path);
+        QVERIFY(intact.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(intact.readAll(), QByteArray("came back different"));
+        intact.close();
     }
 
     void savesAndOpensFromFooterButtons() {

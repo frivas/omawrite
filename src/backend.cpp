@@ -234,6 +234,13 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
     }
 
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        // A reload with nothing left to read leaves this document holding a
+        // name and no file, and the watcher let the path go when it went.
+        // That is the state a new file starts in, so say so: if the file
+        // comes back, the next save asks rather than replacing it unseen.
+        if (!mayStartNewFile && !file.exists())
+            m_pathNeverRead = true;
+
         setStatus(QStringLiteral("Could not open %1.").arg(targetName));
         return;
     }
