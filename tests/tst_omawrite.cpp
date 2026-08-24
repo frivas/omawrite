@@ -233,6 +233,46 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("on disk already"));
     }
 
+    void keepsTheDocumentWhenReloadRacesADeletion() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("racing.md"));
+        QFile onDisk(path);
+        QVERIFY(onDisk.open(QIODevice::WriteOnly | QIODevice::Text));
+        onDisk.write("what was there");
+        onDisk.close();
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("what was there"));
+        editor->setProperty("text", QStringLiteral("words only I have"));
+        QVERIFY(backend.modified());
+
+        // The "File changed" dialog leaves Reload enabled for a file that was
+        // still there when it opened. If the file goes away before the click,
+        // the reload has nothing to read: it must say so, not take the missing
+        // path for a new document and blank the only copy of this text.
+        QVERIFY(QFile::remove(path));
+        backend.reloadFromDisk();
+        QCOMPARE(backend.status(), QStringLiteral("Could not open racing.md."));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("words only I have"));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path));
+        QVERIFY(backend.modified());
+    }
+
     void savesAndOpensFromFooterButtons() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

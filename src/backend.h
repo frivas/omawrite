@@ -90,6 +90,7 @@ signals:
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
+    void openPath(const QUrl &url, bool mayStartNewFile);
     void loadDocumentText(const QString &text);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);

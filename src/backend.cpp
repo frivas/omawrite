@@ -199,6 +199,10 @@ void Backend::openDialog() {
 }
 
 void Backend::open(const QUrl &url) {
+    openPath(url, true);
+}
+
+void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
     if (!url.isLocalFile()) {
         setStatus(QStringLiteral("Only local files can be opened."));
         return;
@@ -209,7 +213,7 @@ void Backend::open(const QUrl &url) {
     // A path that is not there yet is a file the writer means to start, so
     // take the name for a blank document. The first save then lands where
     // they said it should, instead of asking them again.
-    if (!file.exists()) {
+    if (mayStartNewFile && !file.exists()) {
         // Only where it could be written: a name under a directory that is not
         // there leaves the first save with nowhere to land and no dialog.
         const QFileInfo parentDirectory(QFileInfo(url.toLocalFile()).absolutePath());
@@ -280,8 +284,13 @@ void Backend::discardRecovery() {
 }
 
 void Backend::reloadFromDisk() {
+    // Reload is asked for a file we already have, so it must not go down the
+    // path that takes an absent name for a new document: if the file goes away
+    // between the "File changed" dialog opening and the click, blanking the
+    // editor and clearing recovery would throw away the only copy left. Say
+    // it could not be opened and leave the text where it is.
     if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+        openPath(m_fileUrl, false);
 }
 
 void Backend::keepExternalVersion() {
