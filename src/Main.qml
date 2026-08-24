@@ -262,6 +262,14 @@ ApplicationWindow {
 
         function onExternalChangeDetected(deleted, locallyModified) {
             externalChangeDialog.deleted = deleted;
+            externalChangeDialog.appeared = false;
+            externalChangeDialog.locallyModified = locallyModified;
+            externalChangeDialog.open();
+        }
+
+        function onExternalFileAppeared(locallyModified) {
+            externalChangeDialog.deleted = false;
+            externalChangeDialog.appeared = true;
             externalChangeDialog.locallyModified = locallyModified;
             externalChangeDialog.open();
         }

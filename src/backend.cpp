@@ -226,6 +226,7 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
         clearRecovery();
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
+        m_pathNeverRead = true;
         setFileUrl(url);
         setModified(false);
         setStatus(QStringLiteral("New file %1").arg(fileName()));
@@ -242,6 +243,7 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
     clearRecovery();
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
+    m_pathNeverRead = false;
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
@@ -251,6 +253,20 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
 void Backend::save() {
     if (!m_fileUrl.isValid() || m_fileUrl.isEmpty()) {
         saveAsDialog();
+        return;
+    }
+
+    // Nothing can watch a file that is not there, so a name taken for a file
+    // that has yet to be written is unguarded until this save: a `git pull` or
+    // a sync client can put something on that path in the meantime and
+    // QSaveFile::commit() would replace it without a word. Ask once, and only
+    // once -- the flag is cleared by every answer the dialog can give, so a
+    // file that turns out to be unreadable cannot leave the writer trapped in
+    // a question they have already answered.
+    if (m_pathNeverRead && m_fileUrl.isLocalFile()
+            && QFileInfo::exists(m_fileUrl.toLocalFile())) {
+        m_closeAfterSave = false;
+        emit externalFileAppeared(m_modified);
         return;
     }
 
@@ -302,6 +318,11 @@ void Backend::keepExternalVersion() {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
     }
+    // Answered, whether or not the file could be read. Failing to read it is
+    // not a reason to ask again: the writer said to keep their version, and
+    // the next save must be allowed to try, so the filesystem gets to give
+    // the answer instead of the dialog asking the same question forever.
+    m_pathNeverRead = false;
     setModified(true);
     scheduleRecovery();
     watchCurrentFile();
@@ -531,6 +552,7 @@ void Backend::saveTo(const QUrl &url) {
     m_closeAfterSave = false;
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
+    m_pathNeverRead = false;
     setFileUrl(url);
     watchCurrentFile();
     QSettings().setValue(lastSaveDirectorySetting,
@@ -582,9 +604,13 @@ void Backend::restoreRecovery() {
     if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
         m_lastKnownFileContents = diskFile.readAll();
         m_hasKnownFileContents = true;
+        m_pathNeverRead = false;
     } else {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
+        // A snapshot can name a file that was never written -- the crash came
+        // first. That is the same unverified path a new file starts on.
+        m_pathNeverRead = true;
     }
     setFileUrl(recoveredUrl);
     setModified(true);
