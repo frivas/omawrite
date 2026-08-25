@@ -592,6 +592,7 @@ void Backend::writeRecovery() {
     if (!file.open(QIODevice::WriteOnly))
         return;
     const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
+                               {QStringLiteral("pathNeverRead"), m_pathNeverRead},
                                {QStringLiteral("text"), currentDocumentText()}};
     file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
     file.commit();
@@ -611,7 +612,11 @@ void Backend::restoreRecovery() {
     if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
         m_lastKnownFileContents = diskFile.readAll();
         m_hasKnownFileContents = true;
-        m_pathNeverRead = false;
+        // Reading it now says what is on the path, not that this document ever
+        // looked: the file can have arrived while Omawrite was gone. Only the
+        // snapshot knows, so a snapshot without the key predates the flag and
+        // names a path something was written to.
+        m_pathNeverRead = recovery.value(QStringLiteral("pathNeverRead")).toBool();
     } else {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;

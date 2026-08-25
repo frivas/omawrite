@@ -480,6 +480,64 @@ private slots:
         intact.close();
     }
 
+    void remembersANeverReadPathAcrossRecovery() {
+        QTemporaryDir homeDirectory;
+        QVERIFY(homeDirectory.isValid());
+        const QByteArray originalHome = qgetenv("HOME");
+        struct HomeRestorer {
+            QByteArray value;
+            ~HomeRestorer() { qputenv("HOME", value); }
+        } restoreHome{originalHome};
+        QVERIFY(qputenv("HOME", homeDirectory.path().toUtf8()));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("fresh.md"));
+
+        // The snapshot a crash leaves behind, for a new file whose first save
+        // never happened.
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QVERIFY(QDir().mkpath(stateDirectory));
+        QFile snapshot(QDir(stateDirectory).filePath(QStringLiteral("recovery-0.json")));
+        QVERIFY(snapshot.open(QIODevice::WriteOnly));
+        const QJsonObject recovery{
+            {QStringLiteral("fileUrl"), QUrl::fromLocalFile(path).toString()},
+            {QStringLiteral("pathNeverRead"), true},
+            {QStringLiteral("text"), QStringLiteral("words only I have")}};
+        snapshot.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
+        snapshot.close();
+
+        // A file turns up on the path while Omawrite is not running to see it.
+        QFile arrived(path);
+        QVERIFY(arrived.open(QIODevice::WriteOnly | QIODevice::Text));
+        arrived.write("arrived while we were down");
+        arrived.close();
+
+        // Reading it back on restore says what is on the path now, which is
+        // not the same as this document having read it. Without the flag the
+        // first save takes the guard's silence for permission.
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QCOMPARE(backend.status(), QStringLiteral("Recovered unsaved changes"));
+        QSignalSpy appearedSpy(&backend, &Backend::externalFileAppeared);
+        backend.save();
+        QCOMPARE(appearedSpy.count(), 1);
+        QFile untouched(path);
+        QVERIFY(untouched.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(untouched.readAll(), QByteArray("arrived while we were down"));
+        untouched.close();
+    }
+
     void savesAndOpensFromFooterButtons() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
