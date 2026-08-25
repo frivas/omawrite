@@ -268,6 +268,11 @@ ApplicationWindow {
         }
 
         function onExternalFileAppeared(locallyModified) {
+            // This save is not going to happen, so whatever it was for cannot
+            // follow it. Leaving the intent standing lets an unrelated save
+            // minutes later close the window or open another document.
+            win.awaitingPendingSave = false;
+            win.pendingAction = "";
             externalChangeDialog.deleted = false;
             externalChangeDialog.appeared = true;
             externalChangeDialog.locallyModified = locallyModified;

@@ -336,6 +336,53 @@ private slots:
         QCOMPARE(backend.status(), QStringLiteral("Could not save blocked.md."));
     }
 
+    void dropsThePendingCloseWhenTheSaveIsRefused() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("closing.md"));
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        backend.open(QUrl::fromLocalFile(path));
+        editor->setProperty("text", QStringLiteral("my draft"));
+        QVERIFY(backend.modified());
+
+        QFile arrived(path);
+        QVERIFY(arrived.open(QIODevice::WriteOnly | QIODevice::Text));
+        arrived.write("arrived from elsewhere");
+        arrived.close();
+
+        // Closing the window with unsaved changes leaves "close" standing
+        // while the unsaved-changes dialog's Save runs. The guard turns that
+        // save into a question, so the close it was for cannot follow.
+        window->setProperty("pendingAction", QStringLiteral("close"));
+        window->setProperty("awaitingPendingSave", true);
+        QSignalSpy appearedSpy(&backend, &Backend::externalFileAppeared);
+        backend.save();
+        QCOMPARE(appearedSpy.count(), 1);
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QVERIFY(!window->property("awaitingPendingSave").toBool());
+
+        // Otherwise the next successful save -- this one, minutes later and
+        // asked for on its own -- closes the window on the earlier request.
+        backend.keepExternalVersion();
+        backend.save();
+        QVERIFY(!backend.modified());
+        QVERIFY(!window->property("closeConfirmed").toBool());
+    }
+
     void putsKeepMineForwardWhenAFileAppeared() {
         const QString dialogPath = QFINDTESTDATA("../src/ExternalChangeDialog.qml");
         QVERIFY(!dialogPath.isEmpty());
