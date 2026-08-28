@@ -480,6 +480,55 @@ private slots:
         intact.close();
     }
 
+    void writesTheNeverReadPathIntoTheSnapshot() {
+        QTemporaryDir homeDirectory;
+        QVERIFY(homeDirectory.isValid());
+        const QByteArray originalHome = qgetenv("HOME");
+        struct HomeRestorer {
+            QByteArray value;
+            ~HomeRestorer() { qputenv("HOME", value); }
+        } restoreHome{originalHome};
+        QVERIFY(qputenv("HOME", homeDirectory.path().toUtf8()));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("fresh.md"));
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        backend.open(QUrl::fromLocalFile(path));
+        editor->setProperty("text", QStringLiteral("words only I have"));
+        QVERIFY(backend.modified());
+
+        // The snapshot the next run reads is the one this run wrote, so the
+        // flag has to survive the write as well as the read. Hand-writing the
+        // JSON proves only half of that, and it is the half that cannot lose
+        // a file.
+        const QString snapshotPath =
+            QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+                .filePath(QStringLiteral("recovery-0.json"));
+        QTRY_VERIFY(QFile::exists(snapshotPath));
+
+        QFile snapshot(snapshotPath);
+        QVERIFY(snapshot.open(QIODevice::ReadOnly));
+        const QJsonObject recovery = QJsonDocument::fromJson(snapshot.readAll()).object();
+        snapshot.close();
+        QVERIFY(recovery.contains(QStringLiteral("pathNeverRead")));
+        QVERIFY(recovery.value(QStringLiteral("pathNeverRead")).toBool());
+    }
+
     void remembersANeverReadPathAcrossRecovery() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
