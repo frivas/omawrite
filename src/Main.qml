@@ -230,7 +230,11 @@ ApplicationWindow {
 
     Shortcut {
         id: redoShortcut
-        sequences: [StandardKey.Redo]
+        // Qt drops Ctrl+Y from StandardKey.Redo under the GNOME keyboard
+        // scheme, which is the one Omarchy's Qt sessions resolve to.
+        sequences: Qt.platform.os === "osx"
+            ? [StandardKey.Redo]
+            : [StandardKey.Redo, "Ctrl+Y"]
         context: Qt.WindowShortcut
         onActivated: editor.redo()
     }
