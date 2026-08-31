@@ -1352,30 +1352,46 @@ ApplicationWindow {
                 }
             }
 
-            FooterIconButton {
-                objectName: "previewButton"
-                iconName: "preview"
-                iconColor: win.previewMode ? backend.themeAccent : win.mutedColor
-                tooltip: win.previewMode ? "Back to source (Ctrl+/)" : "Preview (Ctrl+/)"
-                onClicked: win.togglePreview()
-            }
-
-            Label {
+            // The right of the footer is what the document is doing: which
+            // way you are looking at it, and how long it has got. File actions
+            // stay on the left. The button had no anchors at all and sat on
+            // top of the save icon.
+            Row {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 10
-                objectName: "wordCountLabel"
+                spacing: 12
+                layoutDirection: Qt.RightToLeft
+
+                Label {
+                    objectName: "wordCountLabel"
                 // With a target set the count becomes progress against it, and
                 // names the draft goal, which is deliberately a quarter longer.
-                text: backend.wordTarget > 0
-                    ? backend.wordCount + " / " + backend.wordTarget + " Words  ("
-                      + backend.draftTargetFor(backend.wordTarget) + " draft)"
-                    : backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
-                color: win.mutedColor
-                opacity: 0.75
-                font.family: backend.editorFontFamily
-                font.pixelSize: win.scaledSize(11)
+                    text: backend.wordTarget > 0
+                        ? backend.wordCount + " / " + backend.wordTarget + " Words  ("
+                          + backend.draftTargetFor(backend.wordTarget) + " draft)"
+                        : backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
+                    color: win.mutedColor
+                    opacity: 0.75
+                    font.family: backend.editorFontFamily
+                    font.pixelSize: win.scaledSize(11)
+                    height: win.scaledSize(16)
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                FooterIconButton {
+                    objectName: "previewButton"
+                    // The icon is the action, not the state: a pencil while
+                    // previewing, because that click returns to the source.
+                    iconName: win.previewMode ? "edit" : "preview"
+                    iconColor: win.previewMode ? backend.themeAccent : win.mutedColor
+                    opacity: win.previewMode ? 0.9 : 0.55
+                    tooltip: win.previewMode ? "Back to source" : "Preview"
+                    onClicked: win.togglePreview()
+
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
             }
         }
 
