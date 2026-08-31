@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QFont>
 #include <QObject>
 #include <QPointer>
 #include <QByteArray>
@@ -32,6 +33,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
 
 public:
+    // Converts a pixel-sized editor font into the resolution-independent
+    // point size a QPrinter needs. Exposed for testing.
+    static QFont printFont(const QFont &editorFont, qreal screenDpi);
+
     explicit Backend(QObject *parent = nullptr);
     ~Backend() override;
 

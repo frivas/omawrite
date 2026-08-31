@@ -13,6 +13,7 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QQuickTextDocument>
+#include <QScreen>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
@@ -301,6 +302,19 @@ void Backend::keepExternalVersion() {
     setStatus(QStringLiteral("Kept your version"));
 }
 
+QFont Backend::printFont(const QFont &editorFont, qreal screenDpi) {
+    QFont font = editorFont;
+    if (font.pixelSize() <= 0)
+        return font;
+
+    // A pixel size is a screen measurement. Handing it to a HighResolution
+    // QPrinter makes the printer read it as 1200-dpi dots, so an 18px font
+    // prints 18/1200 of an inch tall. Points are resolution-independent.
+    const qreal dpi = screenDpi > 0.0 ? screenDpi : 96.0;
+    font.setPointSizeF(font.pixelSize() * 72.0 / dpi);
+    return font;
+}
+
 void Backend::printDocument() {
     if (!m_document) {
         setStatus(QStringLiteral("There is no document to print."));
@@ -316,7 +330,9 @@ void Backend::printDocument() {
 
     if (dialog.exec() == QDialog::Accepted) {
         QTextDocument rendered;
-        rendered.setDefaultFont(m_document->defaultFont());
+        const QScreen *screen = QGuiApplication::primaryScreen();
+        rendered.setDefaultFont(printFont(m_document->defaultFont(),
+                                          screen ? screen->logicalDotsPerInchY() : 0.0));
         rendered.setMarkdown(currentDocumentText());
         rendered.print(&printer);
     }

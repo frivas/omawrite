@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QFont>
+#include <QFontMetricsF>
+#include <QPrinter>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -276,6 +278,49 @@ private slots:
         QCOMPARE(restoredBackend.editorFontSize(), 48);
         restoredBackend.setEditorFontSize(0);
         QCOMPARE(restoredBackend.editorFontSize(), 10);
+    }
+
+    // Issue #29: the editor sizes its font in pixels, and a HighResolution
+    // QPrinter reads those as 1200-dpi dots, printing text about 0.4 mm tall.
+    void convertsPixelFontsToPointsForPrinting() {
+        QFont editorFont(QStringLiteral("iA Writer Mono S"));
+        editorFont.setPixelSize(18);
+
+        const QFont printed = Backend::printFont(editorFont, 96.0);
+        QCOMPARE(printed.pixelSize(), -1);
+        QVERIFY(qAbs(printed.pointSizeF() - 13.5) < 0.01);
+
+        // An unusable DPI falls back to 96 rather than producing a zero size.
+        QVERIFY(qAbs(Backend::printFont(editorFont, 0.0).pointSizeF() - 13.5) < 0.01);
+
+        // A font that already carries a point size is left alone.
+        QFont pointFont(QStringLiteral("iA Writer Mono S"));
+        pointFont.setPointSizeF(11.0);
+        QCOMPARE(Backend::printFont(pointFont, 96.0).pointSizeF(), 11.0);
+    }
+
+    void printsTextAtALegibleSizeOnAHighResolutionPrinter() {
+        QTemporaryDir outputDirectory;
+        QVERIFY(outputDirectory.isValid());
+
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(outputDirectory.filePath(QStringLiteral("out.pdf")));
+
+        QFont editorFont(QStringLiteral("iA Writer Mono S"));
+        editorFont.setPixelSize(18);
+
+        // Measured on the printer itself: at 1200 dpi the unconverted font
+        // lays out around 18 dots. A legible line is a good deal more than a
+        // tenth of an inch.
+        const QFontMetricsF printedMetrics(Backend::printFont(editorFont, 96.0), &printer);
+        QVERIFY2(printedMetrics.height() > printer.logicalDpiY() * 0.1,
+                 qPrintable(QStringLiteral("line height was %1 dots at %2 dpi")
+                                .arg(printedMetrics.height())
+                                .arg(printer.logicalDpiY())));
+
+        const QFontMetricsF rawMetrics(editorFont, &printer);
+        QVERIFY(printedMetrics.height() > rawMetrics.height() * 4);
     }
 
     void remembersLastSaveDirectory() {
