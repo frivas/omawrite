@@ -25,7 +25,7 @@ ApplicationWindow {
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around.
     readonly property real textScale: backend.textScale
-    readonly property int editorFontPixelSize: scaledSize(20)
+    readonly property int editorFontPixelSize: scaledSize(backend.editorFontSize)
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
@@ -154,6 +154,29 @@ ApplicationWindow {
             searchField.forceActiveFocus();
             searchField.selectAll();
         }
+    }
+
+    Shortcut {
+        id: zoomInShortcut
+        // StandardKey.ZoomIn alone misses the unshifted "=" that most keyboards
+        // put the "+" on, which is the key writers actually reach for.
+        sequences: [StandardKey.ZoomIn, "Ctrl+="]
+        context: Qt.ApplicationShortcut
+        onActivated: backend.editorFontSize += 2
+    }
+
+    Shortcut {
+        id: zoomOutShortcut
+        sequences: [StandardKey.ZoomOut]
+        context: Qt.ApplicationShortcut
+        onActivated: backend.editorFontSize -= 2
+    }
+
+    Shortcut {
+        id: zoomResetShortcut
+        sequence: "Ctrl+0"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.resetEditorFontSize()
     }
 
     Shortcut {
@@ -361,6 +384,9 @@ ApplicationWindow {
                 + boldShortcut.nativeText + "  Bold\n"
                 + italicShortcut.nativeText + "  Italic\n"
                 + linkShortcut.nativeText + "  Link\n"
+                + zoomInShortcut.nativeText + "  Increase text size\n"
+                + zoomOutShortcut.nativeText + "  Decrease text size\n"
+                + zoomResetShortcut.nativeText + "  Reset text size\n"
                 + printShortcut.nativeText + "  Print\n"
                 + fullscreenShortcut.nativeText + "  Fullscreen\n"
                 + helpShortcut.nativeText + "  Shortcuts"

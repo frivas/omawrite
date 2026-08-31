@@ -42,6 +42,8 @@ notarization.
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
 - `Ctrl+H` opens find and replace on Linux; macOS uses `Command+Option+F`.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
+- `Ctrl++` and `Ctrl+-` adjust the editor text size. `Ctrl+=` also increases it,
+  and `Ctrl+0` resets it to the original size.
 - `Ctrl+?` shows the keyboard shortcut reference. On macOS, Qt maps `Ctrl`
   shortcuts to their native `Command` equivalents.
 
@@ -51,6 +53,8 @@ and warns before an external change can replace local work.
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
 Omawrite at the size it is designed around; larger and smaller sizes scale from there.
+Editor text size starts at 20px, changes in 2px steps from 10px to 48px, and is
+remembered across launches. Desktop text scaling is applied on top of this base size.
 
 ## Requirements
 
