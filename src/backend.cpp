@@ -56,6 +56,7 @@ constexpr int maximumEditorMeasureChars = 200;
 constexpr qreal defaultPrintMarginMm = 20.0;
 constexpr qreal maximumPrintMarginMm = 60.0;
 const QString wordTargetSetting = QStringLiteral("editor/wordTarget");
+const QString paragraphOnReturnSetting = QStringLiteral("editor/paragraphOnReturn");
 const QString autosaveSetting = QStringLiteral("editor/autosave");
 const QString autosaveDelaySetting = QStringLiteral("editor/autosaveDelayMs");
 constexpr int defaultAutosaveDelayMs = 750;
@@ -158,6 +159,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                              maximumPrintMarginMm);
 
     m_wordTarget = qMax(0, QSettings().value(wordTargetSetting, 0).toInt());
+    m_paragraphOnReturn =
+        QSettings().value(paragraphOnReturnSetting, false).toBool();
     m_autosave = QSettings().value(autosaveSetting, true).toBool();
     m_autosaveDelayMs = qBound(minimumAutosaveDelayMs,
                                QSettings().value(autosaveDelaySetting,
@@ -348,6 +351,15 @@ void Backend::setWordTarget(int wordTarget) {
     m_wordTarget = bounded;
     QSettings().setValue(wordTargetSetting, m_wordTarget);
     emit wordTargetChanged();
+}
+
+void Backend::setParagraphOnReturn(bool paragraphOnReturn) {
+    if (m_paragraphOnReturn == paragraphOnReturn)
+        return;
+
+    m_paragraphOnReturn = paragraphOnReturn;
+    QSettings().setValue(paragraphOnReturnSetting, m_paragraphOnReturn);
+    emit paragraphOnReturnChanged();
 }
 
 void Backend::setAutosave(bool autosave) {

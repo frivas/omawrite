@@ -38,6 +38,8 @@ class Backend : public QObject {
     Q_PROPERTY(qreal printMarginMm READ printMarginMm WRITE setPrintMarginMm
                NOTIFY printMarginMmChanged)
     Q_PROPERTY(int wordTarget READ wordTarget WRITE setWordTarget NOTIFY wordTargetChanged)
+    Q_PROPERTY(bool paragraphOnReturn READ paragraphOnReturn WRITE setParagraphOnReturn
+               NOTIFY paragraphOnReturnChanged)
     Q_PROPERTY(bool autosave READ autosave WRITE setAutosave NOTIFY autosaveChanged)
     Q_PROPERTY(int autosaveDelayMs READ autosaveDelayMs WRITE setAutosaveDelayMs
                NOTIFY autosaveDelayMsChanged)
@@ -129,6 +131,12 @@ public:
     void setWordTarget(int wordTarget);
     Q_INVOKABLE static int draftTargetFor(int wordTarget);
 
+    // Whether Return at the end of a line opens a new Markdown paragraph --
+    // two newlines, so a blank line stands between them -- or just breaks the
+    // line once, which is what most writers expect a Return to do.
+    bool paragraphOnReturn() const { return m_paragraphOnReturn; }
+    void setParagraphOnReturn(bool paragraphOnReturn);
+
     bool autosave() const { return m_autosave; }
     void setAutosave(bool autosave);
     int autosaveDelayMs() const { return m_autosaveDelayMs; }
@@ -189,6 +197,7 @@ signals:
     void editorMeasureCharsChanged();
     void printMarginMmChanged();
     void wordTargetChanged();
+    void paragraphOnReturnChanged();
     void autosaveChanged();
     void autosaveDelayMsChanged();
     void themeColorsChanged();
@@ -237,6 +246,7 @@ private:
     int m_editorMeasureChars = 65;
     qreal m_printMarginMm = 20.0;
     int m_wordTarget = 0;
+    bool m_paragraphOnReturn = false;
     bool m_autosave = true;
     int m_autosaveDelayMs = 750;
     // An outside edit the writer has not answered yet. Autosave must not pick
