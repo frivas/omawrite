@@ -47,6 +47,14 @@ notarization.
 - `Ctrl+?` shows the keyboard shortcut reference. On macOS, Qt maps `Ctrl`
   shortcuts to their native `Command` equivalents.
 
+Autosave is on. A document that has been saved once follows you to disk about
+750ms after you stop typing, so `Ctrl+S` becomes something you press out of
+habit rather than need. Untitled drafts, and a document whose file changed
+underneath you before you said which version wins, get the crash snapshot
+instead -- autosave never picks a version for you and never writes over a file
+it has not read. Turn it off or retune it with the `editor/autosave` and
+`editor/autosaveDelayMs` settings.
+
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
 

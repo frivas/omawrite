@@ -40,6 +40,13 @@ const QString editorFontSizeSetting = QStringLiteral("editor/fontSize");
 constexpr int defaultEditorFontSize = 20;
 constexpr int minimumEditorFontSize = 10;
 constexpr int maximumEditorFontSize = 48;
+const QString autosaveSetting = QStringLiteral("editor/autosave");
+const QString autosaveDelaySetting = QStringLiteral("editor/autosaveDelayMs");
+constexpr int defaultAutosaveDelayMs = 750;
+// Below a fifth of a second the debounce fires mid-word; above a minute it is
+// no longer the safety net it is here to be.
+constexpr int minimumAutosaveDelayMs = 200;
+constexpr int maximumAutosaveDelayMs = 60000;
 
 namespace {
 
@@ -115,9 +122,14 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
+    m_autosave = QSettings().value(autosaveSetting, true).toBool();
+    m_autosaveDelayMs = qBound(minimumAutosaveDelayMs,
+                               QSettings().value(autosaveDelaySetting,
+                                                 defaultAutosaveDelayMs).toInt(),
+                               maximumAutosaveDelayMs);
     m_recoveryTimer.setSingleShot(true);
-    m_recoveryTimer.setInterval(750);
-    connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
+    m_recoveryTimer.setInterval(m_autosaveDelayMs);
+    connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::persistDocument);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
@@ -139,6 +151,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 // baseline is unknown until the writer picks a version. A
                 // deletion counts: the old text is not saved anywhere either.
                 setKnownFileContents(QByteArray(), false);
+                m_externalChangeUnanswered = true;
                 emit externalChangeDetected(deleted, m_modified);
             });
 
@@ -200,6 +213,27 @@ void Backend::setEditorFontSize(int editorFontSize) {
     m_editorFontSize = boundedSize;
     QSettings().setValue(editorFontSizeSetting, m_editorFontSize);
     emit editorFontSizeChanged();
+}
+
+void Backend::setAutosave(bool autosave) {
+    if (m_autosave == autosave)
+        return;
+
+    m_autosave = autosave;
+    QSettings().setValue(autosaveSetting, m_autosave);
+    emit autosaveChanged();
+}
+
+void Backend::setAutosaveDelayMs(int autosaveDelayMs) {
+    const int bounded = qBound(minimumAutosaveDelayMs, autosaveDelayMs,
+                               maximumAutosaveDelayMs);
+    if (m_autosaveDelayMs == bounded)
+        return;
+
+    m_autosaveDelayMs = bounded;
+    m_recoveryTimer.setInterval(m_autosaveDelayMs);
+    QSettings().setValue(autosaveDelaySetting, m_autosaveDelayMs);
+    emit autosaveDelayMsChanged();
 }
 
 void Backend::resetEditorFontSize() {
@@ -268,6 +302,7 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
         m_pathNeverRead = true;
+        m_externalChangeUnanswered = false;
         setFileUrl(url);
         setModified(false);
         setStatus(QStringLiteral("New file %1").arg(fileName()));
@@ -291,6 +326,7 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
     clearRecovery();
     setKnownFileContents(contents, true);
     m_pathNeverRead = false;
+    m_externalChangeUnanswered = false;
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
@@ -357,6 +393,7 @@ void Backend::reloadFromDisk() {
 }
 
 void Backend::keepExternalVersion() {
+    m_externalChangeUnanswered = false;
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
         setKnownFileContents(file.readAll(), true);
@@ -689,6 +726,42 @@ void Backend::saveTo(const QUrl &url) {
 
 void Backend::scheduleRecovery() {
     m_recoveryTimer.start();
+}
+
+bool Backend::canAutosaveToFile() const {
+    if (!m_autosave || !m_fileUrl.isLocalFile())
+        return false;
+
+    // An outside edit nobody has answered yet. The writer picks the version
+    // that survives; autosave does not get to pick it for them.
+    if (m_externalChangeUnanswered)
+        return false;
+
+    // A name taken for a file that was never read is unguarded: nothing can
+    // watch a path with no file, so something can arrive on it between the
+    // naming and the write. The first save is the one that asks about that,
+    // so leave it to the writer -- until they have saved once, this document
+    // keeps getting the snapshot instead.
+    if (m_pathNeverRead)
+        return false;
+
+    return true;
+}
+
+// The debounce that used to only ever write the crash snapshot. A document
+// with a name it is safe to write goes to its own file; everything else --
+// untitled drafts, and anything the guardrails hold back -- keeps getting the
+// snapshot, so no edit is ever only in memory.
+void Backend::persistDocument() {
+    if (!m_modified)
+        return;
+
+    if (canAutosaveToFile()) {
+        saveTo(m_fileUrl);
+        return;
+    }
+
+    writeRecovery();
 }
 
 QString Backend::recoveryPath() const {
