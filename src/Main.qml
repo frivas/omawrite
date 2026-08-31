@@ -74,6 +74,44 @@ ApplicationWindow {
         unsavedChangesDialog.open();
     }
 
+    // Every text operation returns the whole document plus a caret offset.
+    // Routing it through the editor's own insert/remove keeps it one undo step.
+    function applyTextOperation(operation) {
+        if (!operation || operation.text === undefined
+                || operation.text === editor.text) {
+            return false;
+        }
+
+        EditorMutations.replaceRange(editor, 0, editor.text.length, operation.text);
+        editor.cursorPosition = Math.max(0, Math.min(editor.text.length,
+                                                     operation.cursor));
+        return true;
+    }
+
+    function moveParagraph(delta) {
+        win.applyTextOperation(
+            backend.moveParagraph(editor.text, editor.cursorPosition, delta));
+    }
+
+    // One key for both directions: a paragraph sitting on one line explodes,
+    // and one already split back into sentences collapses.
+    function toggleSentenceLines() {
+        if (win.applyTextOperation(
+                backend.explodeSentences(editor.text, editor.cursorPosition))) {
+            return;
+        }
+
+        win.applyTextOperation(
+            backend.collapseSentences(editor.text, editor.cursorPosition));
+    }
+
+    function jumpToOutlineEntry(position) {
+        outlineDialog.close();
+        editor.forceActiveFocus();
+        editor.cursorPosition = Math.max(0, Math.min(editor.text.length, position));
+        editorFlick.ensureCursorVisible();
+    }
+
     function completePendingAction() {
         var action = pendingAction;
         pendingAction = "";
@@ -209,6 +247,34 @@ ApplicationWindow {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
+    }
+
+    Shortcut {
+        id: moveParagraphUpShortcut
+        sequence: "Alt+Up"
+        context: Qt.WindowShortcut
+        onActivated: win.moveParagraph(-1)
+    }
+
+    Shortcut {
+        id: moveParagraphDownShortcut
+        sequence: "Alt+Down"
+        context: Qt.WindowShortcut
+        onActivated: win.moveParagraph(1)
+    }
+
+    Shortcut {
+        id: sentenceLinesShortcut
+        sequence: "Ctrl+L"
+        context: Qt.WindowShortcut
+        onActivated: win.toggleSentenceLines()
+    }
+
+    Shortcut {
+        id: outlineShortcut
+        sequence: "Ctrl+Shift+O"
+        context: Qt.ApplicationShortcut
+        onActivated: outlineDialog.open()
     }
 
     Shortcut {
@@ -424,6 +490,10 @@ ApplicationWindow {
                 + italicShortcut.nativeText + "  Italic\n"
                 + linkShortcut.nativeText + "  Link\n"
                 + previewShortcut.nativeText + "  Preview\n"
+                + moveParagraphUpShortcut.nativeText + " / "
+                + moveParagraphDownShortcut.nativeText + "  Move paragraph\n"
+                + sentenceLinesShortcut.nativeText + "  Sentences on their own lines\n"
+                + outlineShortcut.nativeText + "  Outline\n"
                 + zoomInShortcut.nativeText + "  Increase text size\n"
                 + zoomOutShortcut.nativeText + "  Decrease text size\n"
                 + zoomResetShortcut.nativeText + "  Reset text size\n"
@@ -431,6 +501,55 @@ ApplicationWindow {
                 + fullscreenShortcut.nativeText + "  Fullscreen\n"
                 + helpShortcut.nativeText + "  Shortcuts"
             lineHeight: 1.5
+        }
+    }
+
+    Dialog {
+        id: outlineDialog
+        objectName: "outlineDialog"
+        modal: true
+        title: "Outline"
+        standardButtons: Dialog.Close
+        anchors.centerIn: parent
+        width: Math.min(win.width - 80, 520)
+
+        // Read on open rather than bound to the text: the list is a snapshot to
+        // navigate by, and rebuilding it on every keystroke while the dialog is
+        // shut is work nobody sees.
+        property var entries: []
+        onAboutToShow: entries = backend.outlineFor(editor.text)
+
+        contentItem: ScrollView {
+            clip: true
+            implicitHeight: Math.min(win.height - 200, Math.max(60, outlineList.contentHeight))
+
+            ListView {
+                id: outlineList
+                objectName: "outlineList"
+                model: outlineDialog.entries
+                spacing: 2
+
+                delegate: ItemDelegate {
+                    width: outlineList.width
+                    // Nested headings step in, so the shape of the argument is
+                    // visible at a glance.
+                    leftPadding: 8 + (modelData.level - 1) * 16
+                    text: modelData.title
+                    font.family: backend.editorFontFamily
+                    font.pixelSize: win.scaledSize(modelData.level === 1 ? 14 : 12)
+                    font.weight: modelData.level === 1 ? Font.Bold : Font.Normal
+                    onClicked: win.jumpToOutlineEntry(modelData.position)
+                }
+            }
+        }
+
+        Label {
+            anchors.centerIn: parent
+            visible: outlineDialog.entries.length === 0
+            text: "No headings yet."
+            color: win.mutedColor
+            font.family: backend.editorFontFamily
+            font.pixelSize: win.scaledSize(12)
         }
     }
 
@@ -1061,7 +1180,13 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 10
-                text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
+                objectName: "wordCountLabel"
+                // With a target set the count becomes progress against it, and
+                // names the draft goal, which is deliberately a quarter longer.
+                text: backend.wordTarget > 0
+                    ? backend.wordCount + " / " + backend.wordTarget + " Words  ("
+                      + backend.draftTargetFor(backend.wordTarget) + " draft)"
+                    : backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
                 color: win.mutedColor
                 opacity: 0.75
                 font.family: backend.editorFontFamily

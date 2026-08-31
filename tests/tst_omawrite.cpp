@@ -1734,6 +1734,186 @@ private slots:
         return renderedDocument->textDocument();
     }
 
+    void splitsParagraphsIntoSentences() {
+        const QStringList plain = Backend::splitSentences(
+            QStringLiteral("One thing. Then another! And a third? Yes."));
+        QCOMPARE(plain, QStringList({QStringLiteral("One thing."),
+                                     QStringLiteral("Then another!"),
+                                     QStringLiteral("And a third?"),
+                                     QStringLiteral("Yes.")}));
+
+        // Abbreviations and initials are not sentence ends.
+        QCOMPARE(Backend::splitSentences(
+                     QStringLiteral("Dr. Smith wrote it. J. B. Peterson agrees.")),
+                 QStringList({QStringLiteral("Dr. Smith wrote it."),
+                              QStringLiteral("J. B. Peterson agrees.")}));
+        QCOMPARE(Backend::splitSentences(
+                     QStringLiteral("Use tools, e.g. this one. Then stop.")),
+                 QStringList({QStringLiteral("Use tools, e.g. this one."),
+                              QStringLiteral("Then stop.")}));
+
+        // Decimals stay put.
+        QCOMPARE(Backend::splitSentences(QStringLiteral("It grew 3.5 times. Truly.")),
+                 QStringList({QStringLiteral("It grew 3.5 times."),
+                              QStringLiteral("Truly.")}));
+
+        QCOMPARE(Backend::splitSentences(QString()), QStringList());
+        QCOMPARE(Backend::splitSentences(QStringLiteral("No terminator here")),
+                 QStringList({QStringLiteral("No terminator here")}));
+    }
+
+    void explodesAndCollapsesTheParagraphAtTheCursor() {
+        const QString text = QStringLiteral(
+            "Intro line.\n\nFirst point. Second point. Third point.\n\nAfter.");
+        const int cursor = text.indexOf(QStringLiteral("Second"));
+
+        const QVariantMap exploded = Backend::explodeSentences(text, cursor);
+        QCOMPARE(exploded.value(QStringLiteral("text")).toString(),
+                 QStringLiteral("Intro line.\n\nFirst point.\nSecond point.\n"
+                                "Third point.\n\nAfter."));
+
+        // Round trip: collapsing the exploded paragraph restores it.
+        const QVariantMap collapsed = Backend::collapseSentences(
+            exploded.value(QStringLiteral("text")).toString(),
+            exploded.value(QStringLiteral("cursor")).toInt());
+        QCOMPARE(collapsed.value(QStringLiteral("text")).toString(), text);
+
+        // Neighbouring paragraphs are untouched, and a one-sentence paragraph
+        // is left exactly as it is.
+        const QVariantMap single = Backend::explodeSentences(text, 0);
+        QCOMPARE(single.value(QStringLiteral("text")).toString(), text);
+    }
+
+    void movesTheParagraphAtTheCursorPastItsNeighbour() {
+        const QString text = QStringLiteral("Alpha one.\n\nBeta two.\n\nGamma three.");
+        const int inBeta = text.indexOf(QStringLiteral("Beta"));
+
+        const QVariantMap up = Backend::moveParagraph(text, inBeta, -1);
+        QCOMPARE(up.value(QStringLiteral("text")).toString(),
+                 QStringLiteral("Beta two.\n\nAlpha one.\n\nGamma three."));
+        // The cursor rides along with the paragraph it was in.
+        const QString movedUp = up.value(QStringLiteral("text")).toString();
+        QCOMPARE(movedUp.mid(up.value(QStringLiteral("cursor")).toInt(), 4),
+                 QStringLiteral("Beta"));
+
+        const QVariantMap down = Backend::moveParagraph(text, inBeta, 1);
+        QCOMPARE(down.value(QStringLiteral("text")).toString(),
+                 QStringLiteral("Alpha one.\n\nGamma three.\n\nBeta two."));
+
+        // At either end there is nothing to trade places with.
+        QCOMPARE(Backend::moveParagraph(text, 0, -1)
+                     .value(QStringLiteral("text")).toString(), text);
+        QCOMPARE(Backend::moveParagraph(text, text.indexOf(QStringLiteral("Gamma")), 1)
+                     .value(QStringLiteral("text")).toString(), text);
+    }
+
+    void movesMultiLineParagraphsWhole() {
+        const QString text = QStringLiteral(
+            "First line\nsecond line\n\nOther paragraph.");
+        const QVariantMap down = Backend::moveParagraph(text, 0, 1);
+        QCOMPARE(down.value(QStringLiteral("text")).toString(),
+                 QStringLiteral("Other paragraph.\n\nFirst line\nsecond line"));
+    }
+
+    void readsTheOutlineFromHeadings() {
+        const QString text = QStringLiteral(
+            "# Title\n\nSome words.\n\n## First part\n\nMore.\n\n"
+            "```\n# not a heading\n```\n\n### Deep\n");
+        const QVariantList outline = Backend::outlineFor(text);
+        QCOMPARE(outline.size(), 3);
+
+        const QVariantMap first = outline.at(0).toMap();
+        QCOMPARE(first.value(QStringLiteral("level")).toInt(), 1);
+        QCOMPARE(first.value(QStringLiteral("title")).toString(), QStringLiteral("Title"));
+        QCOMPARE(first.value(QStringLiteral("position")).toInt(), 0);
+
+        QCOMPARE(outline.at(1).toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("First part"));
+        QCOMPARE(outline.at(2).toMap().value(QStringLiteral("level")).toInt(), 3);
+
+        // The position is where the heading actually starts.
+        const int deepPosition =
+            outline.at(2).toMap().value(QStringLiteral("position")).toInt();
+        QVERIFY(text.mid(deepPosition).startsWith(QStringLiteral("### Deep")));
+
+        QCOMPARE(Backend::outlineFor(QStringLiteral("no headings here")).size(), 0);
+    }
+
+    void computesADraftTargetAQuarterAboveTheFinalLength() {
+        QCOMPARE(Backend::draftTargetFor(1000), 1250);
+        QCOMPARE(Backend::draftTargetFor(4), 5);
+        // No target means no draft target, rather than a target of zero words.
+        QCOMPARE(Backend::draftTargetFor(0), 0);
+        QCOMPARE(Backend::draftTargetFor(-10), 0);
+    }
+
+    void remembersTheWordTarget() {
+        {
+            Backend backend;
+            QCOMPARE(backend.wordTarget(), 0);
+            QSignalSpy targetSpy(&backend, &Backend::wordTargetChanged);
+            backend.setWordTarget(1500);
+            QCOMPARE(targetSpy.count(), 1);
+            backend.setWordTarget(-5);
+            QCOMPARE(backend.wordTarget(), 0);
+            backend.setWordTarget(1500);
+        }
+
+        Backend restored;
+        QCOMPARE(restored.wordTarget(), 1500);
+    }
+
+    void showsProgressAgainstTheWordTargetInTheFooter() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("one two three"));
+
+        QObject *count = window->findChild<QObject *>(QStringLiteral("wordCountLabel"));
+        QVERIFY(count);
+        QTRY_COMPARE(count->property("text").toString(), QStringLiteral("3 Words"));
+
+        backend.setWordTarget(1000);
+        QTRY_COMPARE(count->property("text").toString(),
+                     QStringLiteral("3 / 1000 Words  (1250 draft)"));
+    }
+
+    void listsTheDocumentHeadingsInTheOutlineDialog() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text",
+                            QStringLiteral("# One\n\nwords\n\n## Two\n\nmore\n"));
+
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("outlineDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_COMPARE(dialog->property("entries").toList().size(), 2);
+        QCOMPARE(dialog->property("entries").toList().at(1).toMap()
+                     .value(QStringLiteral("title")).toString(),
+                 QStringLiteral("Two"));
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
