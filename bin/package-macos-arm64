@@ -54,7 +54,10 @@ cd "$BUILD_DIR"
 # Never carry frameworks or plugins over from a previous Qt toolchain.
 rm -rf "$APP"
 "$QMAKE" "$ROOT/omawrite.pro" CONFIG+=release QMAKE_APPLE_DEVICE_ARCHS=arm64
-make clean
+# A release wants the clean build; day to day the objects are worth keeping.
+if [ "${OMAWRITE_NO_CACHE:-}" = "1" ]; then
+  make clean
+fi
 make -j"$JOBS"
 
 BINARY="$APP/Contents/MacOS/omawrite"
@@ -70,17 +73,85 @@ if [ "$ARCHS" != "arm64" ]; then
 fi
 
 QT_LIBS="$("$QMAKE" -query QT_INSTALL_LIBS)"
+QT_VERSION="$("$QMAKE" -query QT_VERSION)"
 
-# macdeployqt does not always search the SDK's top-level library directory
-# when Qt is installed as split packages (as Homebrew does). Supplying qmake's
-# reported library directory also works with the official Qt SDK.
+# Deploying Qt takes minutes and produces the same result every time: the
+# frameworks only change when Qt does, while the part that actually changed is
+# our own 640K executable. Keep the deployed Qt and reuse it, keyed on the Qt
+# that produced it so an upgrade cannot be served a stale one.
+#
+# Reliability is the whole point here, so the assembled bundle goes through
+# exactly the same checks as a freshly deployed one, plus one that is only
+# meaningful for this path: the executable must not name Homebrew anywhere.
+# Linking it against the build machine's Qt while the bundle carries its own
+# is the failure that runs here and dies everywhere else.
+CACHE_ROOT="$BUILD_DIR/.deployed-qt"
+CACHE="$CACHE_ROOT/$QT_VERSION-$(echo "$QT_LIBS" | shasum -a 256 | cut -c1-12)"
+
+run_macdeployqt() {
+  # macdeployqt does not always search the SDK's top-level library directory
+  # when Qt is installed as split packages (as Homebrew does). Supplying
+  # qmake's reported library directory also works with the official Qt SDK.
+  if [ -d "$QT_LIBS" ]; then
+    "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -libpath="$QT_LIBS" \
+      -appstore-compliant -always-overwrite
+  else
+    "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -appstore-compliant \
+      -always-overwrite
+  fi
+}
+
+# Point the executable at the Qt inside the bundle. A fresh link names Qt by
+# absolute Homebrew path; macdeployqt rewrites those, and when the frameworks
+# come from the cache instead, this does.
+relink_to_bundled_qt() {
+  # The digits matter: QtQuickControls2 and QtQuickDialogs2 are frameworks
+  # too, and a pattern of letters alone silently skips them -- leaving the
+  # executable pointed at the build machine's Qt for exactly those two.
+  for dependency in $(otool -L "$BINARY" | awk '{print $1}' | grep '^/.*Qt[A-Za-z0-9]*\.framework/'); do
+    relative="$(echo "$dependency" | sed 's|^.*/\(Qt[A-Za-z0-9]*\.framework/.*\)$|\1|')"
+    install_name_tool -change "$dependency" \
+      "@executable_path/../Frameworks/$relative" "$BINARY"
+  done
+  # Nothing may resolve through the build machine's Qt, so the rpath that
+  # reaches it goes too. Absent on some toolchains, hence the guard.
+  install_name_tool -delete_rpath /opt/homebrew/lib "$BINARY" 2>/dev/null || true
+}
+
 rm -f "$BUILD_DIR/omawrite.dmg"
-if [ -d "$QT_LIBS" ]; then
-  "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -libpath="$QT_LIBS" \
-    -appstore-compliant -always-overwrite
+
+if [ "${OMAWRITE_NO_CACHE:-}" = "1" ] || [ ! -d "$CACHE/Frameworks" ]; then
+  run_macdeployqt
+
+  # Keep what was just deployed, written aside and moved into place so a run
+  # interrupted here cannot leave a half-filled cache behind.
+  staging="$(mktemp -d "$CACHE_ROOT.XXXXXX")"
+  mkdir -p "$staging"
+  for part in Frameworks PlugIns; do
+    [ -d "$APP/Contents/$part" ] && cp -R "$APP/Contents/$part" "$staging/$part"
+  done
+  [ -d "$APP/Contents/Resources/qml" ] && cp -R "$APP/Contents/Resources/qml" "$staging/qml"
+  [ -f "$APP/Contents/Resources/qt.conf" ] && cp "$APP/Contents/Resources/qt.conf" "$staging/qt.conf"
+  rm -rf "$CACHE"
+  mkdir -p "$CACHE_ROOT"
+  mv "$staging" "$CACHE"
+  echo "Deployed Qt $QT_VERSION and kept it for the next build."
 else
-  "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -appstore-compliant \
-    -always-overwrite
+  echo "Reusing the deployed Qt $QT_VERSION from $CACHE"
+  for part in Frameworks PlugIns; do
+    [ -d "$CACHE/$part" ] && cp -R "$CACHE/$part" "$APP/Contents/$part"
+  done
+  mkdir -p "$APP/Contents/Resources"
+  [ -d "$CACHE/qml" ] && cp -R "$CACHE/qml" "$APP/Contents/Resources/qml"
+  [ -f "$CACHE/qt.conf" ] && cp "$CACHE/qt.conf" "$APP/Contents/Resources/qt.conf"
+  relink_to_bundled_qt
+fi
+
+# Whichever path built it, the executable must reach only the Qt in the bundle.
+if otool -L "$BINARY" | tail -n +2 | awk '{print $1}' | grep -q '^/.*Qt'; then
+  echo "the executable still links Qt outside the bundle:" >&2
+  otool -L "$BINARY" | tail -n +2 | awk '{print $1}' | grep '^/.*Qt' >&2
+  exit 1
 fi
 
 # The official SDK ships a Mimer SQL plugin that links to a proprietary client
