@@ -51,7 +51,9 @@ notarization.
 - `Ctrl+?` shows the keyboard shortcut reference. On macOS, Qt maps `Ctrl`
   shortcuts to their native `Command` equivalents.
 
-The editor's appearance is configurable through QSettings, alongside autosave:
+`Ctrl+,` opens Preferences, which covers everything below. On macOS the same
+settings live under the app menu. They are stored with QSettings, so they can
+also be set from a script:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
