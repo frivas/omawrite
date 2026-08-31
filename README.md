@@ -75,6 +75,12 @@ instead -- autosave never picks a version for you and never writes over a file
 it has not read. Turn it off or retune it with the `editor/autosave` and
 `editor/autosaveDelayMs` settings.
 
+Fenced code is highlighted when the fence names a language: bash, python,
+javascript and typescript, C and C++, rust, go, ruby, sql, json, yaml, toml and
+qml, under their usual short names. Keywords take the theme's accent so
+highlighted code still belongs to the page; a fence with no language stays
+plain.
+
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
 

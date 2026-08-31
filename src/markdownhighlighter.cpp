@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QFont>
+#include <QSet>
 #include <QFontMetricsF>
 #include <QTextDocument>
 
@@ -93,6 +94,26 @@ void MarkdownHighlighter::rebuildFormats() {
     m_fenceFormat = m_codeFormat;
     m_fenceFormat.setForeground(marker);
 
+    // Keywords take the theme's accent, so highlighted code belongs to the
+    // same document rather than looking like a widget dropped into it. The
+    // other two are fixed pairs, picked to sit against either page without
+    // competing with the accent.
+    m_codeCommentFormat = m_codeFormat;
+    m_codeCommentFormat.setForeground(marker);
+    m_codeCommentFormat.setFontItalic(true);
+
+    m_codeStringFormat = m_codeFormat;
+    m_codeStringFormat.setForeground(m_darkMode ? QColor(QStringLiteral("#8fd4ae"))
+                                                : QColor(QStringLiteral("#0b7a5a")));
+
+    m_codeNumberFormat = m_codeFormat;
+    m_codeNumberFormat.setForeground(m_darkMode ? QColor(QStringLiteral("#e2a978"))
+                                                : QColor(QStringLiteral("#9a5300")));
+
+    m_codeKeywordFormat = m_codeFormat;
+    m_codeKeywordFormat.setForeground(link);
+    m_codeKeywordFormat.setFontWeight(QFont::DemiBold);
+
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
     m_quoteFormat.setFontItalic(true);
@@ -114,11 +135,26 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
     // closing one, so no markup runs inside it. The state rides from block to
     // block, and Qt rehighlights the rest of the document when it changes.
     const bool fence = isFence(text);
-    const bool insideFence = previousBlockState() == InsideFence;
-    setCurrentBlockState(fence == insideFence ? Prose : InsideFence);
+    const int previous = previousBlockState() < 0 ? Prose : previousBlockState();
+    const bool insideFence = (previous & InsideFence) != 0;
+
+    // The opening fence names the language; every line under it needs to know,
+    // so the language rides in the block state above the inside-a-fence bit.
+    QStringList languages = codeLanguages();
+    int languageIndex = previous >> LanguageShift;
+    if (fence && !insideFence)
+        languageIndex = qMax(0, languages.indexOf(languageForFence(text)) + 1);
+    else if (!insideFence)
+        languageIndex = 0;
+
+    const bool nowInside = fence != insideFence;
+    setCurrentBlockState(nowInside ? (InsideFence | (languageIndex << LanguageShift))
+                                   : Prose);
 
     if (fence || insideFence) {
         setFormat(0, text.length(), fence ? m_fenceFormat : m_codeFormat);
+        if (insideFence && languageIndex > 0 && languageIndex <= languages.size())
+            highlightCode(text, languages.at(languageIndex - 1));
         highlightSearch(text);
         return;
     }
@@ -131,6 +167,201 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         }
     }
     highlightSearch(text);
+}
+
+namespace {
+struct LanguageRules {
+    const char *name;
+    const char *aliases;      // space separated, name included
+    const char *lineComment;  // may hold two, separated by a space
+    const char *keywords;     // space separated
+};
+
+// Short on purpose. A keyword list long enough to be exhaustive is a
+// dictionary to maintain; these are the words that actually carry the shape of
+// a snippet, and anything missing simply reads as plain code.
+const LanguageRules languageTable[] = {
+    {"bash", "bash sh shell zsh console", "#",
+     "if then else elif fi for while do done case esac function return in "
+     "export local readonly set unset echo cd exit source alias trap"},
+    {"python", "python py", "#",
+     "def class return if elif else for while in is not and or none true false "
+     "import from as with try except finally raise yield lambda pass break "
+     "continue global nonlocal assert async await self"},
+    {"javascript", "javascript js typescript ts jsx tsx node", "//",
+     "const let var function return if else for while do class extends new "
+     "import export from default async await try catch finally throw typeof "
+     "instanceof this null undefined true false switch case break continue "
+     "interface type enum implements readonly public private"},
+    {"cpp", "cpp c c++ cc h hpp objc", "//",
+     "int char bool void float double long short unsigned signed const "
+     "constexpr static inline class struct enum union namespace template "
+     "typename public private protected virtual override final return if else "
+     "for while do switch case break continue new delete nullptr true false "
+     "auto using include define sizeof"},
+    {"rust", "rust rs", "//",
+     "fn let mut const static struct enum impl trait pub use mod match if else "
+     "for while loop return break continue where self Self as dyn ref move "
+     "async await unsafe true false Some None Ok Err"},
+    {"go", "go golang", "//",
+     "func package import var const type struct interface map chan go defer "
+     "return if else for range switch case break continue nil true false make "
+     "new select"},
+    {"ruby", "ruby rb", "#",
+     "def class module end if elsif else unless while until for in do return "
+     "yield require require_relative attr_accessor attr_reader self nil true "
+     "false begin rescue ensure raise"},
+    {"sql", "sql postgres postgresql mysql sqlite", "--",
+     "select from where insert into values update set delete create table "
+     "alter drop index view join left right inner outer on group by order "
+     "having limit offset distinct as and or not null primary key foreign "
+     "references default constraint returning with union"},
+    {"json", "json", "",
+     "true false null"},
+    {"yaml", "yaml yml", "#", "true false null yes no on off"},
+    {"toml", "toml", "#", "true false"},
+    {"qml", "qml", "//",
+     "import property readonly signal function var let const if else for while "
+     "return true false null anchors id on as"},
+};
+
+const LanguageRules *rulesFor(const QString &language) {
+    if (language.isEmpty())
+        return nullptr;
+
+    for (const LanguageRules &rules : languageTable) {
+        const QStringList aliases =
+            QString::fromLatin1(rules.aliases).split(QLatin1Char(' '));
+        if (aliases.contains(language))
+            return &rules;
+    }
+    return nullptr;
+}
+
+bool isWordCharacter(QChar character) {
+    return character.isLetterOrNumber() || character == QLatin1Char('_');
+}
+}
+
+QString MarkdownHighlighter::languageForFence(const QString &fenceLine) {
+    static const QRegularExpression infoRe(
+        QStringLiteral("^\\s*(?:```|~~~)\\s*([A-Za-z0-9_+#-]+)"));
+    const QRegularExpressionMatch match = infoRe.match(fenceLine);
+    if (!match.hasMatch())
+        return {};
+
+    const QString requested = match.captured(1).toLower();
+    const LanguageRules *rules = rulesFor(requested);
+    return rules ? QString::fromLatin1(rules->name) : QString();
+}
+
+QList<MarkdownHighlighter::CodeSpanToken>
+MarkdownHighlighter::codeTokens(const QString &line, const QString &language) {
+    QList<CodeSpanToken> tokens;
+    const LanguageRules *rules = rulesFor(language);
+    if (!rules)
+        return tokens;
+
+    const QStringList commentMarkers = QString::fromLatin1(rules->lineComment)
+                                           .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const QStringList keywordList =
+        QString::fromLatin1(rules->keywords).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const QSet<QString> keywords(keywordList.cbegin(), keywordList.cend());
+
+    int index = 0;
+    while (index < line.size()) {
+        const QChar character = line.at(index);
+
+        // A comment runs to the end of the line, so nothing after it is code.
+        bool comment = false;
+        for (const QString &marker : commentMarkers) {
+            if (!marker.isEmpty() && line.mid(index, marker.size()) == marker) {
+                tokens.append({index, int(line.size() - index), CodeToken::Comment});
+                comment = true;
+                break;
+            }
+        }
+        if (comment)
+            break;
+
+        if (character == QLatin1Char('"') || character == QLatin1Char('\'')
+                || character == QLatin1Char('`')) {
+            const QChar quote = character;
+            int end = index + 1;
+            while (end < line.size()) {
+                if (line.at(end) == QLatin1Char('\\')) {
+                    end += 2;
+                    continue;
+                }
+                if (line.at(end) == quote) {
+                    ++end;
+                    break;
+                }
+                ++end;
+            }
+            // An unterminated quote takes the rest of the line, which is what
+            // it looks like on screen anyway.
+            const int stop = qMin(end, line.size());
+            tokens.append({index, stop - index, CodeToken::String});
+            index = stop;
+            continue;
+        }
+
+        if (character.isDigit()
+                && (index == 0 || !isWordCharacter(line.at(index - 1)))) {
+            int end = index;
+            while (end < line.size()
+                   && (line.at(end).isLetterOrNumber() || line.at(end) == QLatin1Char('.')
+                       || line.at(end) == QLatin1Char('x'))) {
+                ++end;
+            }
+            tokens.append({index, end - index, CodeToken::Number});
+            index = end;
+            continue;
+        }
+
+        if (isWordCharacter(character)
+                && (index == 0 || !isWordCharacter(line.at(index - 1)))) {
+            int end = index;
+            while (end < line.size() && isWordCharacter(line.at(end)))
+                ++end;
+            const QString word = line.mid(index, end - index);
+            if (keywords.contains(word.toLower()) || keywords.contains(word))
+                tokens.append({index, end - index, CodeToken::Keyword});
+            index = end;
+            continue;
+        }
+
+        ++index;
+    }
+
+    return tokens;
+}
+
+QStringList MarkdownHighlighter::codeLanguages() {
+    QStringList names;
+    for (const LanguageRules &rules : languageTable)
+        names << QString::fromLatin1(rules.name);
+    return names;
+}
+
+void MarkdownHighlighter::highlightCode(const QString &text, const QString &language) {
+    for (const CodeSpanToken &token : codeTokens(text, language)) {
+        switch (token.token) {
+        case CodeToken::Comment:
+            setFormat(token.start, token.length, m_codeCommentFormat);
+            break;
+        case CodeToken::String:
+            setFormat(token.start, token.length, m_codeStringFormat);
+            break;
+        case CodeToken::Number:
+            setFormat(token.start, token.length, m_codeNumberFormat);
+            break;
+        case CodeToken::Keyword:
+            setFormat(token.start, token.length, m_codeKeywordFormat);
+            break;
+        }
+    }
 }
 
 bool MarkdownHighlighter::isFence(const QString &text) {
