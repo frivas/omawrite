@@ -2289,6 +2289,109 @@ private slots:
         QVERIFY(qAbs(flick->property("contentY").toReal() - platformMomentumY) <= 1.0);
     }
 
+    void recognisesAContentBlockLine() {
+        Backend::ContentBlock block;
+
+        QVERIFY(Backend::contentBlockOnLine(QStringLiteral("notes.txt"), &block));
+        QCOMPARE(block.path, QStringLiteral("notes.txt"));
+        QVERIFY(block.caption.isEmpty());
+
+        QVERIFY(Backend::contentBlockOnLine(
+            QStringLiteral("figures/diagram.png \"Figure 1\""), &block));
+        QCOMPARE(block.path, QStringLiteral("figures/diagram.png"));
+        QCOMPARE(block.caption, QStringLiteral("Figure 1"));
+
+        QVERIFY(Backend::contentBlockOnLine(
+            QStringLiteral("data.csv (Quarterly figures)"), &block));
+        QCOMPARE(block.caption, QStringLiteral("Quarterly figures"));
+
+        // Prose that merely mentions a file is not a block.
+        QVERIFY(!Backend::contentBlockOnLine(
+            QStringLiteral("Open notes.txt and read it."), nullptr));
+        // Neither is a link, a URL, or a path out of the folder.
+        QVERIFY(!Backend::contentBlockOnLine(QStringLiteral("![](a.png)"), nullptr));
+        QVERIFY(!Backend::contentBlockOnLine(
+            QStringLiteral("https://example.com/a.png"), nullptr));
+        QVERIFY(!Backend::contentBlockOnLine(QStringLiteral("/etc/passwd.txt"), nullptr));
+        QVERIFY(!Backend::contentBlockOnLine(QStringLiteral("~/secrets.txt"), nullptr));
+        QVERIFY(!Backend::contentBlockOnLine(QStringLiteral("no extension"), nullptr));
+    }
+
+    void embedsContentBlocksWhenRendering() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString root = folder.path();
+        QVERIFY(QDir().mkpath(root + QStringLiteral("/parts")));
+
+        auto write = [&](const QString &relative, const QByteArray &contents) {
+            QFile file(root + QLatin1Char('/') + relative);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(contents);
+        };
+        write(QStringLiteral("parts/intro.txt"), "Borrowed prose.\n");
+        write(QStringLiteral("snippet.py"), "def hello():\n    return 1\n");
+        write(QStringLiteral("data.csv"), "Quarter,Revenue\nQ1,\"1,200\"\nQ2,1400\n");
+        write(QStringLiteral("chart.png"), "not really a png");
+
+        const QString source = QStringLiteral(
+            "# Report\n\nparts/intro.txt\n\nsnippet.py\n\n"
+            "data.csv (Quarterly figures)\n\nchart.png \"Figure 1\"\n");
+        const QString rendered = Backend::expandContentBlocks(source, root);
+
+        // Prose comes in as itself.
+        QVERIFY(rendered.contains(QStringLiteral("Borrowed prose.")));
+        QVERIFY(!rendered.contains(QStringLiteral("parts/intro.txt")));
+
+        // Code arrives fenced under its own extension, so it is highlighted.
+        QVERIFY(rendered.contains(QStringLiteral("```py\ndef hello():")));
+
+        // A CSV becomes a table, with the quoted comma kept inside its cell.
+        QVERIFY(rendered.contains(QStringLiteral("| Quarter | Revenue |")));
+        QVERIFY(rendered.contains(QStringLiteral("| --- | --- |")));
+        QVERIFY(rendered.contains(QStringLiteral("| Q1 | 1,200 |")));
+        QVERIFY(rendered.contains(QStringLiteral("*Quarterly figures*")));
+
+        // An image becomes an image, with its caption as the alt text.
+        QVERIFY(rendered.contains(QStringLiteral("![Figure 1](file://")));
+    }
+
+    void leavesContentBlocksAloneWhenItShould() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString root = folder.path();
+        {
+            QFile file(root + QStringLiteral("/notes.txt"));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("inlined\n");
+        }
+
+        // A path that climbs out of the document's folder is not followed,
+        // however it is spelled.
+        const QString escape = QStringLiteral("../../../../etc/hosts\n");
+        QCOMPARE(Backend::expandContentBlocks(escape, root), escape);
+
+        // A file that is not there stays as the writer typed it.
+        const QString missing = QStringLiteral("nothing-here.txt\n");
+        QCOMPARE(Backend::expandContentBlocks(missing, root), missing);
+
+        // Inside a fence a path is code, not a block.
+        const QString fenced =
+            QStringLiteral("```\nnotes.txt\n```\n");
+        QCOMPARE(Backend::expandContentBlocks(fenced, root), fenced);
+
+        // A line with prose around it is prose.
+        const QString surrounded = QStringLiteral("See below\nnotes.txt\nand above\n");
+        QCOMPARE(Backend::expandContentBlocks(surrounded, root), surrounded);
+
+        // An untitled draft has no folder, so nothing resolves.
+        QCOMPARE(Backend::expandContentBlocks(QStringLiteral("notes.txt\n"), QString()),
+                 QStringLiteral("notes.txt\n"));
+
+        // And the real thing still works from the same folder.
+        QVERIFY(Backend::expandContentBlocks(QStringLiteral("notes.txt\n"), root)
+                    .contains(QStringLiteral("inlined")));
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());

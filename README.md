@@ -75,6 +75,21 @@ instead -- autosave never picks a version for you and never writes over a file
 it has not read. Turn it off or retune it with the `editor/autosave` and
 `editor/autosaveDelayMs` settings.
 
+A line holding nothing but a file path embeds that file when the document is
+rendered -- iA Writer calls these content blocks:
+
+    parts/intro.txt
+    snippet.py
+    data.csv (Quarterly figures)
+    chart.png "Figure 1"
+
+Text arrives as itself, code arrives fenced under its own extension so it is
+highlighted, a CSV or TSV becomes a table, and an image becomes an image with
+its caption as alt text. Paths resolve inside the folder the document was
+opened from and nowhere else, so a document cannot read its way out of it. The
+source keeps the path you typed; the embedding happens in the preview and in
+what is printed or saved as PDF.
+
 Fenced code is highlighted when the fence names a language: bash, python,
 javascript and typescript, C and C++, rust, go, ruby, sql, json, yaml, toml and
 qml, under their usual short names. Keywords take the theme's accent so
