@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [macos, master]
+  pull_request:
+  # Merging upstream is when this fork is most likely to break, so allow a
+  # manual run before pushing a merge.
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: build and test (macOS, Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        run: brew install qt
+
+      - name: Build
+        run: ./bin/build
+
+      - name: Test
+        run: ./bin/test
+
+      - name: Package
+        # Proves the bundle still deploys and signs; the DMG is not published.
+        run: ./bin/package-macos-arm64
+
+      - name: Check the bundle carries no Homebrew paths
+        run: |
+          set -eu
+          APP=build-macos/omawrite.app
+          test -x "$APP/Contents/MacOS/omawrite"
+          if otool -l "$APP/Contents/MacOS/omawrite" | grep -q "/opt/homebrew"; then
+            echo "the packaged binary still links against Homebrew Qt" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict "$APP"

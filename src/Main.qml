@@ -658,7 +658,12 @@ ApplicationWindow {
         title: "Keyboard shortcuts"
         standardButtons: Dialog.Close
         anchors.centerIn: parent
+        // Dialog derives contentWidth from contentItem.implicitWidth while the
+        // contentItem's width comes back from availableWidth, which is a loop.
+        // Naming the width breaks it.
+        contentWidth: shortcutsLabel.implicitWidth
         contentItem: Label {
+            id: shortcutsLabel
             text: saveShortcut.nativeText + "  Save\n"
                 + saveAsShortcut.nativeText + "  Save As\n"
                 + openShortcut.nativeText + "  Open\n"
