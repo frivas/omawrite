@@ -96,6 +96,10 @@ qml, under their usual short names. Keywords take the theme's accent so
 highlighted code still belongs to the page; a fence with no language stays
 plain.
 
+About Omawrite, in the application menu, names the version and the commit the
+binary was built from. A build from a tree with uncommitted changes marks the
+commit with a `+`, so it never claims to be a commit it is not.
+
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
 

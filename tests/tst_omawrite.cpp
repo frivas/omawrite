@@ -2420,6 +2420,47 @@ private slots:
                     .contains(QStringLiteral("inlined")));
     }
 
+    void showsTheVersionAndCommitInAbout() {
+        // Both are baked in at build time, so an unknown here means the build
+        // lost track of what it was built from.
+        QVERIFY(!Backend::appVersion().isEmpty());
+        QCOMPARE(Backend::appVersion(), QStringLiteral("0.1.0"));
+        QVERIFY(!Backend::appCommit().isEmpty());
+        QVERIFY2(Backend::appCommit() != QStringLiteral("unknown"),
+                 "the build did not record a commit");
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *about = window->findChild<QObject *>(QStringLiteral("aboutDialog"));
+        QVERIFY(about);
+        QVERIFY(QMetaObject::invokeMethod(about, "open"));
+
+        auto text = [&](const char *name) {
+            QObject *item = window->findChild<QObject *>(QString::fromLatin1(name));
+            return item ? item->property("text").toString() : QString();
+        };
+        QCOMPARE(text("aboutName"), QStringLiteral("Omawrite"));
+        QCOMPARE(text("aboutVersion"),
+                 QStringLiteral("Version ") + Backend::appVersion());
+        QCOMPARE(text("aboutCommit"), Backend::appCommit());
+
+        // The mark is really in the binary, not a path that resolves to
+        // nothing at runtime.
+        QObject *icon = window->findChild<QObject *>(QStringLiteral("aboutIcon"));
+        QVERIFY(icon);
+        QVERIFY(QFile::exists(QStringLiteral(":/omawrite-icon.png")));
+        QTRY_COMPARE(icon->property("status").toInt(), 1);  // Image.Ready
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());

@@ -7,7 +7,7 @@ linux: QT += dbus
 CONFIG += c++17 release
 TARGET = omawrite
 TEMPLATE = app
-VERSION = 0.1.0
+include(version.pri)
 
 macx {
     ICON = pkgbuild/omawrite.icns

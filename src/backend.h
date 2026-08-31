@@ -37,6 +37,8 @@ class Backend : public QObject {
                NOTIFY editorMeasureCharsChanged)
     Q_PROPERTY(qreal printMarginMm READ printMarginMm WRITE setPrintMarginMm
                NOTIFY printMarginMmChanged)
+    Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString appCommit READ appCommit CONSTANT)
     Q_PROPERTY(int wordTarget READ wordTarget WRITE setWordTarget NOTIFY wordTargetChanged)
     Q_PROPERTY(bool paragraphOnReturn READ paragraphOnReturn WRITE setParagraphOnReturn
                NOTIFY paragraphOnReturnChanged)
@@ -146,6 +148,10 @@ public:
 
     // 0 means no target. The first draft is deliberately written long, so the
     // draft goal is the target plus a quarter.
+    // Baked in at build time, so About names the commit this binary is.
+    static QString appVersion();
+    static QString appCommit();
+
     int wordTarget() const { return m_wordTarget; }
     void setWordTarget(int wordTarget);
     Q_INVOKABLE static int draftTargetFor(int wordTarget);

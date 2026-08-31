@@ -522,6 +522,22 @@ void Backend::setPrintMarginMm(qreal marginMm) {
     emit printMarginMmChanged();
 }
 
+QString Backend::appVersion() {
+#ifdef OMAWRITE_VERSION
+    return QStringLiteral(OMAWRITE_VERSION);
+#else
+    return QStringLiteral("unknown");
+#endif
+}
+
+QString Backend::appCommit() {
+#ifdef OMAWRITE_COMMIT
+    return QStringLiteral(OMAWRITE_COMMIT);
+#else
+    return QStringLiteral("unknown");
+#endif
+}
+
 int Backend::draftTargetFor(int wordTarget) {
     if (wordTarget <= 0)
         return 0;

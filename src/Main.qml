@@ -252,6 +252,17 @@ ApplicationWindow {
         onActivated: editor.insertLink()
     }
 
+    AboutDialog {
+        id: aboutDialog
+        textScale: win.textScale
+        textColor: win.textColor
+        mutedColor: win.mutedColor
+        accentColor: backend.themeAccent
+        fontFamily: backend.editorFontFamily
+        version: backend.appVersion
+        commit: backend.appCommit
+    }
+
     Shortcut {
         id: moveParagraphUpShortcut
         sequence: "Alt+Up"
@@ -425,6 +436,14 @@ ApplicationWindow {
     Platform.MenuBar {
         Platform.Menu {
             title: "Omawrite"
+
+            Platform.MenuItem {
+                text: "About Omawrite"
+                // AboutRole puts it where macOS keeps it: first in the
+                // application menu, above the separator.
+                role: Platform.MenuItem.AboutRole
+                onTriggered: aboutDialog.open()
+            }
 
             Platform.MenuItem {
                 text: "Preferences\u2026"

@@ -16,6 +16,8 @@
         <file alias="fonts/iAWriterQuattroS-Italic.ttf">../fonts/iAWriterQuattroS-Italic.ttf</file>
         <file alias="fonts/iAWriterQuattroS-Bold.ttf">../fonts/iAWriterQuattroS-Bold.ttf</file>
         <file alias="fonts/iAWriterQuattroS-BoldItalic.ttf">../fonts/iAWriterQuattroS-BoldItalic.ttf</file>
+        <file alias="AboutDialog.qml">AboutDialog.qml</file>
+        <file alias="omawrite-icon.png">../pkgbuild/omawrite-icon.png</file>
         <file alias="fonts/iAWriterMonoS-Regular.ttf">../fonts/iAWriterMonoS-Regular.ttf</file>
         <file alias="fonts/iAWriterMonoS-Italic.ttf">../fonts/iAWriterMonoS-Italic.ttf</file>
         <file alias="fonts/iAWriterMonoS-Bold.ttf">../fonts/iAWriterMonoS-Bold.ttf</file>

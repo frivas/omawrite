@@ -4,6 +4,7 @@ macx: CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = tst_omawrite
 
+include(../version.pri)
 INCLUDEPATH += ../src
 RESOURCES += ../src/resources.qrc
 SOURCES += \
