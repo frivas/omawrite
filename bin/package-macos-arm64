@@ -7,7 +7,12 @@ if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
 fi
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-BUILD_DIR="$ROOT/build"
+# Kept apart from bin/build's tree on purpose. A bundle macdeployqt has
+# finished contains Qt frameworks and an executable rewritten to load them from
+# @executable_path; a plain `bin/build` relink hardcodes the Homebrew framework
+# paths again, so a rebuild into a deployed bundle loads two copies of Qt and
+# the app dies before its first window.
+BUILD_DIR="$ROOT/build-macos"
 APP="$BUILD_DIR/omawrite.app"
 
 if command -v qmake6 >/dev/null 2>&1; then
