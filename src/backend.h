@@ -39,6 +39,7 @@ class Backend : public QObject {
                NOTIFY printMarginMmChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString appCommit READ appCommit CONSTANT)
+    Q_PROPERTY(QUrl appCommitUrl READ appCommitUrl CONSTANT)
     Q_PROPERTY(int wordTarget READ wordTarget WRITE setWordTarget NOTIFY wordTargetChanged)
     Q_PROPERTY(bool paragraphOnReturn READ paragraphOnReturn WRITE setParagraphOnReturn
                NOTIFY paragraphOnReturnChanged)
@@ -151,6 +152,11 @@ public:
     // Baked in at build time, so About names the commit this binary is.
     static QString appVersion();
     static QString appCommit();
+
+    // Where to read that commit. Empty when there is nothing worth linking:
+    // no commit recorded, or a tree with uncommitted changes, where the page
+    // would show code the binary was not built from.
+    static QUrl appCommitUrl();
 
     int wordTarget() const { return m_wordTarget; }
     void setWordTarget(int wordTarget);

@@ -2424,7 +2424,7 @@ private slots:
         // Both are baked in at build time, so an unknown here means the build
         // lost track of what it was built from.
         QVERIFY(!Backend::appVersion().isEmpty());
-        QCOMPARE(Backend::appVersion(), QStringLiteral("0.1.0"));
+        QCOMPARE(Backend::appVersion(), QStringLiteral("0.5.0-macos.1"));
         QVERIFY(!Backend::appCommit().isEmpty());
         QVERIFY2(Backend::appCommit() != QStringLiteral("unknown"),
                  "the build did not record a commit");
@@ -2451,7 +2451,20 @@ private slots:
         QCOMPARE(text("aboutName"), QStringLiteral("Omawrite"));
         QCOMPARE(text("aboutVersion"),
                  QStringLiteral("Version ") + Backend::appVersion());
-        QCOMPARE(text("aboutCommit"), Backend::appCommit());
+        // The commit reads as itself, and carries a link to the page it can be
+        // read on when there is one.
+        QVERIFY(text("aboutCommit").contains(Backend::appCommit()));
+
+        const QUrl commitUrl = Backend::appCommitUrl();
+        if (Backend::appCommit().endsWith(QLatin1Char('+'))) {
+            // A modified tree links nowhere: the page would not be this code.
+            QVERIFY(commitUrl.isEmpty());
+        } else {
+            QCOMPARE(commitUrl.toString(),
+                     QStringLiteral("https://github.com/frivas/omawrite/commit/")
+                         + Backend::appCommit());
+            QVERIFY(text("aboutCommit").contains(commitUrl.toString()));
+        }
 
         // The mark is really in the binary, not a path that resolves to
         // nothing at runtime.

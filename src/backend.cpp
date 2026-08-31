@@ -538,6 +538,24 @@ QString Backend::appCommit() {
 #endif
 }
 
+QUrl Backend::appCommitUrl() {
+#ifdef OMAWRITE_REMOTE
+    const QString commit = appCommit();
+    const QString remote = QStringLiteral(OMAWRITE_REMOTE);
+    // A modified tree is marked with a trailing +. Linking it would point at a
+    // page whose code is not what is running, which is worse than not linking.
+    if (remote.isEmpty() || commit.isEmpty()
+            || commit == QStringLiteral("unknown")
+            || commit.endsWith(QLatin1Char('+'))) {
+        return {};
+    }
+
+    return QUrl(remote + QStringLiteral("/commit/") + commit);
+#else
+    return {};
+#endif
+}
+
 int Backend::draftTargetFor(int wordTarget) {
     if (wordTarget <= 0)
         return 0;

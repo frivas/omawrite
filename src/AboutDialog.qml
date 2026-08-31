@@ -16,6 +16,7 @@ Dialog {
     property string fontFamily: "iA Writer Quattro S"
     property string version: ""
     property string commit: ""
+    property url commitUrl: ""
 
     function scaled(size) {
         return Math.round(size * root.textScale);
@@ -59,19 +60,30 @@ Dialog {
             Layout.alignment: Qt.AlignHCenter
         }
 
-        // The commit is the useful part when something behaves unexpectedly,
-        // so it is selectable: it wants to be pasted into a bug report.
+        // The commit is the useful part when something behaves unexpectedly.
+        // Selectable, so it can be pasted into a bug report, and a link when
+        // there is a page to read it on.
         TextEdit {
             objectName: "aboutCommit"
-            text: root.commit
             readOnly: true
             selectByMouse: true
+            textFormat: TextEdit.RichText
+            text: root.commitUrl.toString() !== ""
+                ? "<a href=\"" + root.commitUrl + "\" style=\"color:"
+                  + root.accentColor + ";text-decoration:none\">" + root.commit + "</a>"
+                : root.commit
             color: root.accentColor
             font.family: root.fontFamily
             font.pixelSize: root.scaled(12)
             horizontalAlignment: Text.AlignHCenter
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: root.scaled(2)
+            onLinkActivated: function(link) { backend.openExternalUrl(link); }
+
+            HoverHandler {
+                cursorShape: root.commitUrl.toString() !== ""
+                    ? Qt.PointingHandCursor : Qt.IBeamCursor
+            }
         }
 
         Label {

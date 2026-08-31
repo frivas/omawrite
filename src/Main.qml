@@ -261,6 +261,7 @@ ApplicationWindow {
         fontFamily: backend.editorFontFamily
         version: backend.appVersion
         commit: backend.appCommit
+        commitUrl: backend.appCommitUrl
     }
 
     Shortcut {
