@@ -57,7 +57,7 @@ also be set from a script:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `editor/fontFamily` | `Aptos`, or the bundled face when the system lacks it | Editor and printed page |
+| `editor/fontFamily` | `iA Writer Quattro S` | Editor and printed page. Quattro, Duo and Mono all ship with the app; any installed family can be named instead |
 | `editor/caretStyle` | `line` | `line` is a 2px accent bar; `block` covers the glyph |
 | `editor/caretBlink` | `true` | Blinks on the desktop's own flash time |
 | `editor/measureChars` | `65` | Characters per line, which is what sets the editor's margins |
@@ -89,6 +89,8 @@ remembered across launches. Desktop text scaling is applied on top of this base 
 - Linux: `xdg-desktop-portal` and a portal backend
 - macOS 13 or newer: Xcode Command Line Tools
 
-The iA Writer Mono font is bundled under the SIL Open Font License 1.1; see
-`fonts/OFL.txt`. The font is copyright Information Architects Inc. and based on
-IBM Plex, copyright IBM Corp.
+iA Writer Quattro, Duo and Mono are bundled under the SIL Open Font License
+1.1; see `fonts/OFL.txt`. They differ only in how many character widths they
+allow -- Mono is fully monospaced, Duo gives W and M more room, Quattro has
+four widths and is the default. The fonts are copyright Information Architects
+Inc. and based on IBM Plex, copyright IBM Corp.

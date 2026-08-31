@@ -57,10 +57,17 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName(QStringLiteral("omawrite"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
 
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Regular.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Italic.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Bold.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-BoldItalic.ttf"));
+    // iA's three writing faces differ only in how many character widths they
+    // allow: Mono is fully monospaced, Duo gives W and M more room, and Quattro
+    // has four, which is the one iA Writer itself writes in.
+    for (const QString &family : {QStringLiteral("Mono"), QStringLiteral("Duo"),
+                                  QStringLiteral("Quattro")}) {
+        for (const QString &style : {QStringLiteral("Regular"), QStringLiteral("Italic"),
+                                     QStringLiteral("Bold"), QStringLiteral("BoldItalic")}) {
+            QFontDatabase::addApplicationFont(
+                QStringLiteral(":/fonts/iAWriter%1S-%2.ttf").arg(family, style));
+        }
+    }
     app.setOrganizationName(QStringLiteral("Omacom"));
     app.setOrganizationDomain(QStringLiteral("omacom.io"));
 
@@ -74,7 +81,7 @@ int main(int argc, char *argv[]) {
 
     // Carry the desktop's text scale into the default font, so the chrome that
     // inherits it (dialog titles, buttons) grows along with the writing area.
-    const QFont interfaceFont(QStringLiteral("iA Writer Mono S"));
+    const QFont interfaceFont(Backend::bundledFontFamilies().constFirst());
     const qreal basePointSize = interfaceFont.pointSizeF() > 0
         ? interfaceFont.pointSizeF()
         : app.font().pointSizeF();

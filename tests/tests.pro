@@ -5,6 +5,7 @@ TEMPLATE = app
 TARGET = tst_omawrite
 
 INCLUDEPATH += ../src
+RESOURCES += ../src/resources.qrc
 SOURCES += \
     tst_omawrite.cpp \
     ../src/backend.cpp \
