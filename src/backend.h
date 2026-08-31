@@ -112,6 +112,10 @@ public:
     // The family actually used: the request when the system has it, and the
     // bundled face when it does not, so a font named in settings on one
     // machine cannot leave another with a fallback nobody chose.
+    // Families offered in Preferences: the bundled face first, then whatever
+    // else is installed, so there is always something to fall back to.
+    Q_INVOKABLE static QStringList availableFontFamilies();
+
     static QString resolveFontFamily(const QString &requested,
                                      const QStringList &availableFamilies);
 

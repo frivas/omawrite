@@ -253,6 +253,13 @@ void Backend::setEditorFontSize(int editorFontSize) {
     emit editorFontSizeChanged();
 }
 
+QStringList Backend::availableFontFamilies() {
+    QStringList families = QFontDatabase::families();
+    families.removeAll(bundledFontFamily);
+    families.prepend(bundledFontFamily);
+    return families;
+}
+
 QString Backend::resolveFontFamily(const QString &requested,
                                    const QStringList &availableFamilies) {
     if (!requested.isEmpty() && availableFamilies.contains(requested))

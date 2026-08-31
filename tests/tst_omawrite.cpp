@@ -1914,6 +1914,83 @@ private slots:
                  QStringLiteral("Two"));
     }
 
+    void writesEverySettingFromThePreferencesDialog() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("preferencesDialog"));
+        QVERIFY2(dialog, "the preferences dialog did not load");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+
+        // Every setting has a control, and every control writes the backend.
+        // QVERIFY2 returns void, so the lookup asserts through a pointer the
+        // caller checks rather than returning early from inside the lambda.
+        auto control = [&](const char *name) -> QObject * {
+            QObject *found = window->findChild<QObject *>(QLatin1String(name));
+            if (!found)
+                qWarning("preferences control missing: %s", name);
+            return found;
+        };
+
+        QObject *measure = control("measureBox");
+        QVERIFY(measure);
+        measure->setProperty("value", 90);
+        QVERIFY(QMetaObject::invokeMethod(measure, "valueModified"));
+        QCOMPARE(backend.editorMeasureChars(), 90);
+
+        QObject *target = control("wordTargetBox");
+        QVERIFY(target);
+        target->setProperty("value", 800);
+        QVERIFY(QMetaObject::invokeMethod(target, "valueModified"));
+        QCOMPARE(backend.wordTarget(), 800);
+
+        QObject *margin = control("printMarginBox");
+        QVERIFY(margin);
+        margin->setProperty("value", 30);
+        QVERIFY(QMetaObject::invokeMethod(margin, "valueModified"));
+        QCOMPARE(backend.printMarginMm(), 30.0);
+
+        QObject *delay = control("autosaveDelayBox");
+        QVERIFY(delay);
+        delay->setProperty("value", 1500);
+        QVERIFY(QMetaObject::invokeMethod(delay, "valueModified"));
+        QCOMPARE(backend.autosaveDelayMs(), 1500);
+
+        QObject *blink = control("caretBlinkSwitch");
+        QVERIFY(blink);
+        blink->setProperty("checked", false);
+        QVERIFY(QMetaObject::invokeMethod(blink, "toggled"));
+        QVERIFY(!backend.caretBlink());
+
+        QObject *autosave = control("autosaveSwitch");
+        QVERIFY(autosave);
+        autosave->setProperty("checked", false);
+        QVERIFY(QMetaObject::invokeMethod(autosave, "toggled"));
+        QVERIFY(!backend.autosave());
+
+        QObject *caret = control("caretStyleBox");
+        QVERIFY(caret);
+        caret->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(caret, "activated", Q_ARG(int, 1)));
+        QCOMPARE(backend.caretStyle(), QStringLiteral("block"));
+
+        // The typeface list always offers the bundled face, so there is
+        // something to choose even on a bare machine.
+        QVERIFY(control("fontFamilyBox"));
+        QVERIFY(Backend::availableFontFamilies()
+                    .contains(QStringLiteral("iA Writer Mono S")));
+        QCOMPARE(Backend::availableFontFamilies().first(),
+                 QStringLiteral("iA Writer Mono S"));
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
