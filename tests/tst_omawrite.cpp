@@ -1524,14 +1524,48 @@ private slots:
 
     void fallsBackToTheBundledFaceForAFontTheSystemLacks() {
         const QStringList available{QStringLiteral("Aptos"),
-                                    QStringLiteral("iA Writer Mono S")};
+                                    QStringLiteral("iA Writer Quattro S")};
         QCOMPARE(Backend::resolveFontFamily(QStringLiteral("Aptos"), available),
                  QStringLiteral("Aptos"));
         // Named in settings on another machine, absent here.
         QCOMPARE(Backend::resolveFontFamily(QStringLiteral("Comic Sans MS"), available),
-                 QStringLiteral("iA Writer Mono S"));
+                 QStringLiteral("iA Writer Quattro S"));
         QCOMPARE(Backend::resolveFontFamily(QString(), available),
-                 QStringLiteral("iA Writer Mono S"));
+                 QStringLiteral("iA Writer Quattro S"));
+    }
+
+    void carriesAllThreeIaFacesAndDefaultsToQuattro() {
+        // All three ship with the app, so the typeface list never depends on
+        // what a given machine happens to have installed.
+        QCOMPARE(Backend::bundledFontFamilies(),
+                 QStringList({QStringLiteral("iA Writer Quattro S"),
+                              QStringLiteral("iA Writer Duo S"),
+                              QStringLiteral("iA Writer Mono S")}));
+
+        // Every one of them is really in the binary, under the name Qt will
+        // register it as.
+        for (const QString &family : Backend::bundledFontFamilies()) {
+            const QString stem = QString(family)
+                                     .remove(QStringLiteral("iA Writer "))
+                                     .remove(QLatin1Char(' '));
+            for (const QString &style : {QStringLiteral("Regular"), QStringLiteral("Italic"),
+                                         QStringLiteral("Bold"), QStringLiteral("BoldItalic")}) {
+                const QString path =
+                    QStringLiteral(":/fonts/iAWriter%1-%2.ttf").arg(stem, style);
+                QVERIFY2(QFile::exists(path), qPrintable(path));
+                const int id = QFontDatabase::addApplicationFont(path);
+                QVERIFY2(id >= 0, qPrintable(path));
+                QVERIFY2(QFontDatabase::applicationFontFamilies(id).contains(family),
+                         qPrintable(family + QStringLiteral(" <- ") + path));
+            }
+        }
+
+        // Quattro leads the Preferences list, and is what an unconfigured
+        // editor writes in.
+        QCOMPARE(Backend::availableFontFamilies().first(),
+                 QStringLiteral("iA Writer Quattro S"));
+        Backend backend;
+        QCOMPARE(backend.editorFontFamily(), QStringLiteral("iA Writer Quattro S"));
     }
 
     void remembersCaretAndMeasureAndPrintMargins() {
@@ -1982,13 +2016,13 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(caret, "activated", Q_ARG(int, 1)));
         QCOMPARE(backend.caretStyle(), QStringLiteral("block"));
 
-        // The typeface list always offers the bundled face, so there is
+        // The typeface list always offers the shipped faces, so there is
         // something to choose even on a bare machine.
         QVERIFY(control("fontFamilyBox"));
-        QVERIFY(Backend::availableFontFamilies()
-                    .contains(QStringLiteral("iA Writer Mono S")));
+        for (const QString &family : Backend::bundledFontFamilies())
+            QVERIFY2(Backend::availableFontFamilies().contains(family), qPrintable(family));
         QCOMPARE(Backend::availableFontFamilies().first(),
-                 QStringLiteral("iA Writer Mono S"));
+                 QStringLiteral("iA Writer Quattro S"));
     }
 
     void remembersLastSaveDirectory() {

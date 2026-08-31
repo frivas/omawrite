@@ -46,10 +46,9 @@ const QString caretStyleSetting = QStringLiteral("editor/caretStyle");
 const QString caretBlinkSetting = QStringLiteral("editor/caretBlink");
 const QString editorMeasureCharsSetting = QStringLiteral("editor/measureChars");
 const QString printMarginMmSetting = QStringLiteral("print/marginMm");
-// Bundled with the app, so it is the one family that is always there.
-const QString bundledFontFamily = QStringLiteral("iA Writer Mono S");
-// Chosen when nothing is configured and the system has it.
-const QString preferredFontFamily = QStringLiteral("Aptos");
+// Shipped with the app, so these are the families that are always there.
+// Quattro leads: four character widths, and the face iA Writer defaults to.
+const QString bundledFontFamily = QStringLiteral("iA Writer Quattro S");
 constexpr int defaultEditorMeasureChars = 65;
 constexpr int minimumEditorMeasureChars = 20;
 constexpr int maximumEditorMeasureChars = 200;
@@ -138,13 +137,11 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
-    const QStringList families = QFontDatabase::families();
     const QString requestedFamily =
         QSettings().value(editorFontFamilySetting).toString();
     m_editorFontFamily = requestedFamily.isEmpty()
-        ? (families.contains(preferredFontFamily) ? preferredFontFamily
-                                                  : bundledFontFamily)
-        : resolveFontFamily(requestedFamily, families);
+        ? bundledFontFamily
+        : resolveFontFamily(requestedFamily, availableFontFamilies());
     m_caretStyle = QSettings().value(caretStyleSetting,
                                      QStringLiteral("line")).toString()
                    == QStringLiteral("block")
@@ -253,11 +250,19 @@ void Backend::setEditorFontSize(int editorFontSize) {
     emit editorFontSizeChanged();
 }
 
+QStringList Backend::bundledFontFamilies() {
+    return {QStringLiteral("iA Writer Quattro S"),
+            QStringLiteral("iA Writer Duo S"),
+            QStringLiteral("iA Writer Mono S")};
+}
+
 QStringList Backend::availableFontFamilies() {
     QStringList families = QFontDatabase::families();
-    families.removeAll(bundledFontFamily);
-    families.prepend(bundledFontFamily);
-    return families;
+    // The app's own faces lead the list. Otherwise they sit somewhere in the
+    // middle of a few hundred system families and read as unavailable.
+    for (const QString &bundled : bundledFontFamilies())
+        families.removeAll(bundled);
+    return bundledFontFamilies() + families;
 }
 
 QString Backend::resolveFontFamily(const QString &requested,
