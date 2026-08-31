@@ -41,6 +41,11 @@ public:
     // point size a QPrinter needs. Exposed for testing.
     static QFont printFont(const QFont &editorFont, qreal screenDpi);
 
+    // The name a print job carries. macOS offers it as the default filename in
+    // Save as PDF, so it has to be the document's name without the Markdown
+    // extension rather than the app's idea of an untitled job.
+    static QString printJobName(const QString &documentFileName);
+
     // Starts a second Omawrite, optionally on a file. Exposed so main.cpp can
     // reuse it for Finder's open-document events.
     static bool launchNewInstance(const QString &filePath = QString());

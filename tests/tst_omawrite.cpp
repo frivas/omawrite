@@ -1482,6 +1482,44 @@ private slots:
         QCOMPARE(restored.autosaveDelayMs(), 2000);
     }
 
+    // Command+P then "Save as PDF" offered "Untitled" whatever the document
+    // was called, because the job carried no name at all.
+    void namesThePrintJobAfterTheDocument() {
+        QCOMPARE(Backend::printJobName(QStringLiteral("notes.md")),
+                 QStringLiteral("notes"));
+        QCOMPARE(Backend::printJobName(QStringLiteral("Quarterly Report.markdown")),
+                 QStringLiteral("Quarterly Report"));
+        // A name with dots keeps all but the Markdown extension.
+        QCOMPARE(Backend::printJobName(QStringLiteral("2026.08.31 standup.md")),
+                 QStringLiteral("2026.08.31 standup"));
+        // Anything that is not Markdown keeps the name it has.
+        QCOMPARE(Backend::printJobName(QStringLiteral("readme.txt")),
+                 QStringLiteral("readme.txt"));
+        QCOMPARE(Backend::printJobName(QString()), QStringLiteral("Untitled"));
+    }
+
+    void carriesTheDocumentNameIntoThePrinter() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("chapter-one.md"));
+        {
+            QFile seed(path);
+            QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+            seed.write("text\n");
+        }
+
+        Backend backend;
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+
+        // The untitled case is covered by namesThePrintJobAfterTheDocument();
+        // a fresh Backend here can legitimately claim a leftover snapshot.
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.fileName(), QStringLiteral("chapter-one.md"));
+        QCOMPARE(Backend::printJobName(backend.fileName()),
+                 QStringLiteral("chapter-one"));
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
