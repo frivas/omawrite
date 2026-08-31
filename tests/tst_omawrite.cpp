@@ -2195,6 +2195,34 @@ private slots:
         QCOMPARE(textOf(unterminated, unterminatedTokens.at(1)),
                  QStringLiteral("\"unclosed"));
 
+        // A shell line is mostly a command and a path, and the command is the
+        // part worth seeing. Without this the snippet had nothing in it at all.
+        const QString command = QStringLiteral("open /Users/me/build/omawrite.dmg");
+        const auto commandTokens = tokens(command, QStringLiteral("bash"));
+        QCOMPARE(commandTokens.size(), 1);
+        QCOMPARE(commandTokens.at(0).token, Token::Function);
+        QCOMPARE(textOf(command, commandTokens.at(0)), QStringLiteral("open"));
+
+        // A pipe starts another command.
+        const QString piped = QStringLiteral("cat notes | grep todo");
+        const auto pipedTokens = tokens(piped, QStringLiteral("bash"));
+        QCOMPARE(pipedTokens.size(), 2);
+        QCOMPARE(textOf(piped, pipedTokens.at(0)), QStringLiteral("cat"));
+        QCOMPARE(textOf(piped, pipedTokens.at(1)), QStringLiteral("grep"));
+
+        // An argument is not a command, and a keyword still wins.
+        const QString mixed = QStringLiteral("export PATH=/usr/bin");
+        const auto mixedTokens = tokens(mixed, QStringLiteral("bash"));
+        QCOMPARE(mixedTokens.size(), 1);
+        QCOMPARE(mixedTokens.at(0).token, Token::Keyword);
+
+        // Elsewhere it is a call that makes a name a function.
+        const QString call = QStringLiteral("result = compute(x)");
+        const auto callTokens = tokens(call, QStringLiteral("python"));
+        QCOMPARE(callTokens.size(), 1);
+        QCOMPARE(callTokens.at(0).token, Token::Function);
+        QCOMPARE(textOf(call, callTokens.at(0)), QStringLiteral("compute"));
+
         // No language, no tokens: plain code stays plain.
         QVERIFY(tokens(shell, QString()).isEmpty());
         QVERIFY(tokens(shell, QStringLiteral("brainfuck")).isEmpty());

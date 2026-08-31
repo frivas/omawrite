@@ -114,6 +114,10 @@ void MarkdownHighlighter::rebuildFormats() {
     m_codeKeywordFormat.setForeground(link);
     m_codeKeywordFormat.setFontWeight(QFont::DemiBold);
 
+    m_codeFunctionFormat = m_codeFormat;
+    m_codeFunctionFormat.setForeground(m_darkMode ? QColor(QStringLiteral("#9db8f0"))
+                                                  : QColor(QStringLiteral("#3b5fa8")));
+
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
     m_quoteFormat.setFontItalic(true);
@@ -175,6 +179,7 @@ struct LanguageRules {
     const char *aliases;      // space separated, name included
     const char *lineComment;  // may hold two, separated by a space
     const char *keywords;     // space separated
+    bool commandFirst;        // a shell: the word in command position is the verb
 };
 
 // Short on purpose. A keyword list long enough to be exhaustive is a
@@ -183,46 +188,46 @@ struct LanguageRules {
 const LanguageRules languageTable[] = {
     {"bash", "bash sh shell zsh console", "#",
      "if then else elif fi for while do done case esac function return in "
-     "export local readonly set unset echo cd exit source alias trap"},
+     "export local readonly set unset echo cd exit source alias trap", true},
     {"python", "python py", "#",
      "def class return if elif else for while in is not and or none true false "
      "import from as with try except finally raise yield lambda pass break "
-     "continue global nonlocal assert async await self"},
+     "continue global nonlocal assert async await self", false},
     {"javascript", "javascript js typescript ts jsx tsx node", "//",
      "const let var function return if else for while do class extends new "
      "import export from default async await try catch finally throw typeof "
      "instanceof this null undefined true false switch case break continue "
-     "interface type enum implements readonly public private"},
+     "interface type enum implements readonly public private", false},
     {"cpp", "cpp c c++ cc h hpp objc", "//",
      "int char bool void float double long short unsigned signed const "
      "constexpr static inline class struct enum union namespace template "
      "typename public private protected virtual override final return if else "
      "for while do switch case break continue new delete nullptr true false "
-     "auto using include define sizeof"},
+     "auto using include define sizeof", false},
     {"rust", "rust rs", "//",
      "fn let mut const static struct enum impl trait pub use mod match if else "
      "for while loop return break continue where self Self as dyn ref move "
-     "async await unsafe true false Some None Ok Err"},
+     "async await unsafe true false Some None Ok Err", false},
     {"go", "go golang", "//",
      "func package import var const type struct interface map chan go defer "
      "return if else for range switch case break continue nil true false make "
-     "new select"},
+     "new select", false},
     {"ruby", "ruby rb", "#",
      "def class module end if elsif else unless while until for in do return "
      "yield require require_relative attr_accessor attr_reader self nil true "
-     "false begin rescue ensure raise"},
+     "false begin rescue ensure raise", false},
     {"sql", "sql postgres postgresql mysql sqlite", "--",
      "select from where insert into values update set delete create table "
      "alter drop index view join left right inner outer on group by order "
      "having limit offset distinct as and or not null primary key foreign "
-     "references default constraint returning with union"},
+     "references default constraint returning with union", false},
     {"json", "json", "",
-     "true false null"},
-    {"yaml", "yaml yml", "#", "true false null yes no on off"},
-    {"toml", "toml", "#", "true false"},
+     "true false null", false},
+    {"yaml", "yaml yml", "#", "true false null yes no on off", false},
+    {"toml", "toml", "#", "true false", false},
     {"qml", "qml", "//",
      "import property readonly signal function var let const if else for while "
-     "return true false null anchors id on as"},
+     "return true false null anchors id on as", false},
 };
 
 const LanguageRules *rulesFor(const QString &language) {
@@ -269,6 +274,7 @@ MarkdownHighlighter::codeTokens(const QString &line, const QString &language) {
     const QSet<QString> keywords(keywordList.cbegin(), keywordList.cend());
 
     int index = 0;
+    bool commandPosition = true;
     while (index < line.size()) {
         const QChar character = line.at(index);
 
@@ -326,10 +332,30 @@ MarkdownHighlighter::codeTokens(const QString &line, const QString &language) {
             while (end < line.size() && isWordCharacter(line.at(end)))
                 ++end;
             const QString word = line.mid(index, end - index);
-            if (keywords.contains(word.toLower()) || keywords.contains(word))
+
+            if (keywords.contains(word.toLower()) || keywords.contains(word)) {
                 tokens.append({index, end - index, CodeToken::Keyword});
+                commandPosition = false;
+            } else if (rules->commandFirst && commandPosition) {
+                // The verb of a shell line. Without this a snippet like
+                // `open some/path` has nothing in it to highlight at all.
+                tokens.append({index, end - index, CodeToken::Function});
+                commandPosition = false;
+            } else if (end < line.size() && line.at(end) == QLatin1Char('(')) {
+                tokens.append({index, end - index, CodeToken::Function});
+            }
+
             index = end;
             continue;
+        }
+
+        // A pipe or a separator starts a new command.
+        if (rules->commandFirst
+                && (character == QLatin1Char('|') || character == QLatin1Char(';')
+                    || character == QLatin1Char('&'))) {
+            commandPosition = true;
+        } else if (!character.isSpace()) {
+            commandPosition = false;
         }
 
         ++index;
@@ -359,6 +385,9 @@ void MarkdownHighlighter::highlightCode(const QString &text, const QString &lang
             break;
         case CodeToken::Keyword:
             setFormat(token.start, token.length, m_codeKeywordFormat);
+            break;
+        case CodeToken::Function:
+            setFormat(token.start, token.length, m_codeFunctionFormat);
             break;
         }
     }
