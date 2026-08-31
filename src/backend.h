@@ -37,6 +37,15 @@ public:
     // point size a QPrinter needs. Exposed for testing.
     static QFont printFont(const QFont &editorFont, qreal screenDpi);
 
+    // Starts a second Omawrite, optionally on a file. Exposed so main.cpp can
+    // reuse it for Finder's open-document events.
+    static bool launchNewInstance(const QString &filePath = QString());
+
+    // The .app enclosing an executable directory, or an empty string when the
+    // executable is not inside a bundle. Takes the directory rather than
+    // reading it from the application so it can be tested off a real bundle.
+    static QString enclosingBundlePath(const QString &executableDirPath);
+
     explicit Backend(QObject *parent = nullptr);
     ~Backend() override;
 

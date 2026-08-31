@@ -338,10 +338,47 @@ void Backend::printDocument() {
     }
 }
 
+QString Backend::enclosingBundlePath(const QString &executableDirPath) {
+    // Walked as text rather than with QDir::cdUp(), which needs the directory
+    // to exist and so could not be tested without building a bundle.
+    const QStringList parts = QDir::cleanPath(executableDirPath).split(QLatin1Char('/'));
+    if (parts.size() < 3)
+        return {};
+
+    if (parts.at(parts.size() - 1) != QStringLiteral("MacOS")
+        || parts.at(parts.size() - 2) != QStringLiteral("Contents")
+        || !parts.at(parts.size() - 3).endsWith(QStringLiteral(".app"))) {
+        return {};
+    }
+
+    return QStringList(parts.mid(0, parts.size() - 2)).join(QLatin1Char('/'));
+}
+
+bool Backend::launchNewInstance(const QString &filePath) {
+    QStringList arguments;
+
+#ifdef Q_OS_MACOS
+    // Running the executable inside the bundle directly gives the new instance
+    // its own Dock tile and leaves it unknown to Launch Services. `open -n`
+    // asks macOS for a second instance of the application itself.
+    const QString bundle = enclosingBundlePath(QCoreApplication::applicationDirPath());
+    if (!bundle.isEmpty()) {
+        arguments << QStringLiteral("-n") << QStringLiteral("-a") << bundle;
+        if (!filePath.isEmpty())
+            arguments << QStringLiteral("--args") << filePath;
+
+        return QProcess::startDetached(QStringLiteral("open"), arguments);
+    }
+#endif
+
+    if (!filePath.isEmpty())
+        arguments << filePath;
+
+    return QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments);
+}
+
 void Backend::newWindow() {
-    const bool started = QProcess::startDetached(QCoreApplication::applicationFilePath(),
-                                                 QStringList());
-    if (!started)
+    if (!launchNewInstance())
         setStatus(QStringLiteral("Could not open a new window."));
 }
 
