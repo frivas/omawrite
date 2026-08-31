@@ -793,6 +793,85 @@ QFont Backend::printFont(const QFont &editorFont, qreal screenDpi) {
     return font;
 }
 
+namespace {
+bool isCodeBlock(const QTextBlock &block) {
+    if (!block.isValid())
+        return false;
+
+    const QTextBlockFormat format = block.blockFormat();
+    return format.hasProperty(QTextFormat::BlockCodeLanguage)
+        || format.hasProperty(QTextFormat::BlockCodeFence);
+}
+}
+
+void Backend::styleRenderedDocument(QTextDocument *document, bool forPrint) const {
+    if (!document)
+        return;
+
+    // Qt's Markdown reader packs every block flush against the next, so the
+    // blank lines that separate paragraphs in the source disappear from the
+    // render. Put that breathing room back as real block spacing, sized from
+    // the font so it tracks the desktop text scale.
+    //
+    // The gap is one line of the editor's own leading, because that is exactly
+    // what a blank line between two paragraphs is in the source.
+    const qreal gap = QFontMetricsF(document->defaultFont()).height()
+        * typoraLineHeightPercent / 100.0;
+
+    // Paper is white however the app is themed, so a printed panel comes from
+    // the light palette. On screen the preview follows the editor.
+    const QColor panel = forPrint ? QColor(QStringLiteral("#f2f1ee"))
+                                  : QColor(m_themeCodeBackground);
+
+    QTextCursor cursor(document);
+    cursor.beginEditBlock();
+    for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
+        QTextBlockFormat format = block.blockFormat();
+        const bool heading = format.headingLevel() > 0;
+        const bool listItem = block.textList() != nullptr;
+        const bool quote = format.intProperty(QTextFormat::BlockQuoteLevel) > 0;
+        const bool code = format.hasProperty(QTextFormat::BlockCodeLanguage)
+            || format.hasProperty(QTextFormat::BlockCodeFence);
+
+        if (code) {
+            // Every line of a fence is its own block, so the panel is only
+            // continuous if the blocks touch: no margins between them, and
+            // none of the prose leading, which leaves a bare stripe.
+            const bool opensRun = !isCodeBlock(block.previous());
+            const bool closesRun = !isCodeBlock(block.next());
+            format.setTopMargin(opensRun ? gap : 0);
+            format.setBottomMargin(closesRun ? gap : 0);
+            format.setLineHeight(100, QTextBlockFormat::ProportionalHeight);
+            if (panel.isValid())
+                format.setBackground(panel);
+        } else {
+            // Headings lead their section, list items stay tight together, and
+            // ordinary paragraphs get a full blank line's worth beneath them.
+            // Quotes need the leading gap too or they read as another list row.
+            format.setTopMargin(heading ? gap * 1.5 : (quote ? gap : 0));
+            format.setBottomMargin(listItem ? gap * 0.2 : gap);
+            format.setLineHeight(typoraLineHeightPercent,
+                                 QTextBlockFormat::ProportionalHeight);
+            format.clearBackground();
+        }
+
+        cursor.setPosition(block.position());
+        cursor.setBlockFormat(format);
+
+        if (code) {
+            // Code wants a monospaced face whatever the prose is set in, and
+            // the app carries one, so it is there on any machine.
+            QTextCharFormat monospaced;
+            monospaced.setFontFamilies({QStringLiteral("iA Writer Mono S")});
+            cursor.setPosition(block.position());
+            cursor.setPosition(block.position() + block.length() - 1,
+                               QTextCursor::KeepAnchor);
+            cursor.mergeCharFormat(monospaced);
+        }
+    }
+    cursor.endEditBlock();
+}
+
 QString Backend::printJobName(const QString &documentFileName) {
     const QString trimmed = documentFileName.trimmed();
     if (trimmed.isEmpty())
@@ -815,41 +894,7 @@ void Backend::renderPreview(QObject *textDocument) {
     preview->setDefaultFont(m_document ? m_document->defaultFont() : preview->defaultFont());
     preview->setMarkdown(renderableDocumentText());
 
-    // Qt's Markdown reader packs every block flush against the next, so the
-    // blank lines that separate paragraphs in the source disappear from the
-    // render. Put that breathing room back as real block spacing, sized from
-    // the editor font so it tracks the desktop text scale.
-    //
-    // The gap is one line of the editor's own leading, because that is exactly
-    // what a blank line between two paragraphs is in the source. Anything else
-    // makes the preview a differently spaced document.
-    // Measured rather than taken from the font's pixel size, which a
-    // point-sized font does not have.
-    const qreal gap = QFontMetricsF(preview->defaultFont()).height()
-        * typoraLineHeightPercent / 100.0;
-
-    QTextCursor cursor(preview);
-    cursor.beginEditBlock();
-    for (QTextBlock block = preview->begin(); block.isValid(); block = block.next()) {
-        QTextBlockFormat format = block.blockFormat();
-        const bool heading = format.headingLevel() > 0;
-        const bool listItem = block.textList() != nullptr;
-        const bool quote = format.intProperty(QTextFormat::BlockQuoteLevel) > 0;
-
-        // Headings lead their section, list items stay tight together, and
-        // ordinary paragraphs get a full blank line's worth beneath them.
-        // Quotes need the leading gap too or they read as another list row.
-        format.setTopMargin(heading ? gap * 1.5 : (quote ? gap : 0));
-        format.setBottomMargin(listItem ? gap * 0.2 : gap);
-
-        // The same leading the editor writes with. Without it the preview is
-        // set tighter than the source and reads as a different document.
-        format.setLineHeight(typoraLineHeightPercent,
-                             QTextBlockFormat::ProportionalHeight);
-        cursor.setPosition(block.position());
-        cursor.setBlockFormat(format);
-    }
-    cursor.endEditBlock();
+    styleRenderedDocument(preview, false);
 }
 
 namespace {
@@ -1107,6 +1152,9 @@ void Backend::printDocument() {
         printed.setFamily(m_editorFontFamily);
         rendered.setDefaultFont(printed);
         rendered.setMarkdown(renderableDocumentText());
+        // Printing rendered a bare document before this: no paragraph spacing,
+        // no leading, no panel behind code.
+        styleRenderedDocument(&rendered, true);
         rendered.print(&printer);
     }
 }
@@ -1202,6 +1250,15 @@ bool Backend::editorTextChanged() {
         if (blockCount > m_formattedBlockCount)
             reapplyTypographyToChange();
         m_formattedBlockCount = blockCount;
+    }
+
+    // Only the number of fences decides who sits on a panel, so the shading
+    // pass runs when that changes rather than on every keystroke.
+    const int fences = currentDocumentText().count(QStringLiteral("```"))
+        + currentDocumentText().count(QStringLiteral("~~~"));
+    if (fences != m_fenceLineCount) {
+        m_fenceLineCount = fences;
+        applyCodeBlockShading();
     }
 
     scheduleWordCount();
@@ -1712,7 +1769,57 @@ void Backend::applyDocumentTypography() {
 
     m_document->setUndoRedoEnabled(undoEnabled);
 
+    applyCodeBlockShading();
+
     m_formattedBlockCount = m_document->blockCount();
+}
+
+// Paint the panel behind every line of every fence. Only the fence structure
+// matters here, so the pass runs when the number of fence lines changes rather
+// than on every keystroke: typing inside a fence lands on a block that already
+// carries the panel, and a new line inherits it from the one above.
+void Backend::applyCodeBlockShading() {
+    if (!m_document)
+        return;
+
+    const QColor panel(m_themeCodeBackground);
+    if (!panel.isValid())
+        return;
+
+    const bool undoEnabled = m_document->isUndoRedoEnabled();
+    m_document->setUndoRedoEnabled(false);
+    m_formattingTypography = true;
+
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+
+    bool insideFence = false;
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        const QString trimmed = block.text().trimmed();
+        const bool fence = trimmed.startsWith(QStringLiteral("```"))
+            || trimmed.startsWith(QStringLiteral("~~~"));
+        // The fences themselves are part of the panel they open and close.
+        const bool shaded = fence || insideFence;
+        if (fence)
+            insideFence = !insideFence;
+
+        QTextBlockFormat format = block.blockFormat();
+        const bool alreadyShaded = format.background().style() != Qt::NoBrush;
+        if (shaded == alreadyShaded)
+            continue;
+
+        if (shaded)
+            format.setBackground(panel);
+        else
+            format.clearBackground();
+
+        cursor.setPosition(block.position());
+        cursor.setBlockFormat(format);
+    }
+
+    cursor.endEditBlock();
+    m_formattingTypography = false;
+    m_document->setUndoRedoEnabled(undoEnabled);
 }
 
 void Backend::reapplyTypographyToChange() {

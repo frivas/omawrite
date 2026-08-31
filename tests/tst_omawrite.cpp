@@ -6,6 +6,8 @@
 #include <QJsonObject>
 #include <QTextBlock>
 #include <QWheelEvent>
+#include <QPainter>
+#include <QAbstractTextDocumentLayout>
 #include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QPrinter>
@@ -2472,6 +2474,157 @@ private slots:
         QVERIFY(icon);
         QVERIFY(QFile::exists(QStringLiteral(":/omawrite-icon.png")));
         QTRY_COMPARE(icon->property("status").toInt(), 1);  // Image.Ready
+    }
+
+    // The panel behind code has to be a block, not a character background:
+    // a character background stops at the last glyph on each line and leaves
+    // the leading bare, which is stripes rather than a panel.
+    void putsFencedCodeOnAWholeBlockPanel() {
+        Backend backend;
+        QQuickTextDocument *doc = attachTextEdit(&backend);
+        QVERIFY(doc);
+
+        doc->textDocument()->setPlainText(QStringLiteral(
+            "Prose above.\n\n```python\ndef hello():\n    return 1\n```\n\nProse below.\n"));
+        backend.editorTextChanged();
+
+        QTextDocument *document = doc->textDocument();
+        QStringList shaded;
+        QStringList bare;
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
+            if (block.blockFormat().background().style() != Qt::NoBrush)
+                shaded << block.text();
+            else if (!block.text().trimmed().isEmpty())
+                bare << block.text();
+        }
+
+        // The fences and everything between them, and nothing else.
+        QCOMPARE(shaded, QStringList({QStringLiteral("```python"),
+                                      QStringLiteral("def hello():"),
+                                      QStringLiteral("    return 1"),
+                                      QStringLiteral("```")}));
+        QVERIFY(bare.contains(QStringLiteral("Prose above.")));
+        QVERIFY(bare.contains(QStringLiteral("Prose below.")));
+    }
+
+    // What is printed is what is rendered, so this covers Save as PDF too.
+    // Checked by drawing the page and reading the pixels rather than trusting
+    // the format flags: the flags were set before and it still looked wrong.
+    void printsCodeOnAPanelThatCoversTheLine() {
+        QQmlEngine engine;
+        QScopedPointer<QObject> harness(makeRenderHarness(engine));
+        QVERIFY(harness);
+
+        Backend backend;
+        QTextDocument *rendered = renderThrough(backend, harness.data(),
+            QStringLiteral("Prose above.\n\n```python\ndef hello():\n    return 1\n```\n"));
+        QVERIFY(rendered);
+
+        QTextBlock code;
+        for (QTextBlock block = rendered->begin(); block.isValid(); block = block.next()) {
+            if (block.text().contains(QStringLiteral("def hello")))
+                code = block;
+        }
+        QVERIFY(code.isValid());
+        QVERIFY2(code.blockFormat().background().style() != Qt::NoBrush,
+                 "the printed code block carries no panel");
+
+        // Draw it and look: the panel must reach past the end of the text,
+        // which is exactly what a character background fails to do.
+        rendered->setTextWidth(600);
+        QImage page(600, int(rendered->size().height()) + 8,
+                    QImage::Format_ARGB32_Premultiplied);
+        page.fill(Qt::white);
+        QPainter painter(&page);
+        rendered->drawContents(&painter);
+        painter.end();
+
+        const QAbstractTextDocumentLayout *layout = rendered->documentLayout();
+        const QRectF codeRect = layout->blockBoundingRect(code);
+        const int y = int(codeRect.center().y());
+        const QColor panel(backend.themeCodeBackground());
+        QVERIFY(panel.isValid());
+
+        // Rendering antialiases, so the panel is compared with a tolerance --
+        // and against the page, which is what it must not be.
+        auto isPanel = [&](int x) {
+            const QColor pixel = page.pixelColor(x, y);
+            return qAbs(pixel.red() - panel.red()) <= 3
+                && qAbs(pixel.green() - panel.green()) <= 3
+                && qAbs(pixel.blue() - panel.blue()) <= 3;
+        };
+
+        // Well past "def hello():", where a character background would have
+        // stopped and left the page showing through.
+        QVERIFY2(isPanel(560), qPrintable(page.pixelColor(560, y).name()));
+        // And at the very start of the line.
+        QVERIFY2(isPanel(4), qPrintable(page.pixelColor(4, y).name()));
+        // The page above the block is not the panel, or this proves nothing.
+        QVERIFY(page.pixelColor(560, 2) != panel);
+    }
+
+    // Printing is not previewing: paper is white however the app is themed,
+    // so the panel behind code comes from the light palette. The first version
+    // of this printed a near-black slab with black text on it.
+    void printsCodeOnALightPanelWhateverTheTheme() {
+        QQmlEngine engine;
+        QScopedPointer<QObject> harness(makeRenderHarness(engine));
+        QVERIFY(harness);
+
+        Backend backend;
+        backend.setDarkMode(true);
+        const QString source =
+            QStringLiteral("Prose.\n\n```python\ndef hello():\n    return 1\n```\n\nAfter.\n");
+
+        QTextDocument printed;
+        printed.setMarkdown(source);
+        backend.styleRenderedDocumentForTest(&printed, true);
+
+        QTextBlock code;
+        int codeBlocks = 0;
+        for (QTextBlock block = printed.begin(); block.isValid(); block = block.next()) {
+            if (block.blockFormat().background().style() != Qt::NoBrush) {
+                ++codeBlocks;
+                if (!code.isValid())
+                    code = block;
+            }
+        }
+        QCOMPARE(codeBlocks, 2);
+        QVERIFY(code.isValid());
+
+        // Light enough to read black text on, whatever the editor is set to.
+        const QColor panel = code.blockFormat().background().color();
+        QVERIFY2(panel.lightness() > 200,
+                 qPrintable(QStringLiteral("printed panel was %1").arg(panel.name())));
+
+        // The dark theme is still what the preview would use, so this is a
+        // real difference rather than the app having no theme.
+        QTextDocument previewed;
+        previewed.setMarkdown(source);
+        backend.styleRenderedDocumentForTest(&previewed, false);
+        QColor previewPanel;
+        for (QTextBlock block = previewed.begin(); block.isValid(); block = block.next()) {
+            if (block.blockFormat().background().style() != Qt::NoBrush) {
+                previewPanel = block.blockFormat().background().color();
+                break;
+            }
+        }
+        QVERIFY(previewPanel.isValid());
+        QVERIFY(previewPanel.lightness() < 100);
+
+        // A run of code opens and closes with a gap, so the panel does not run
+        // straight into the prose above and below it.
+        QVERIFY(code.blockFormat().topMargin() > 0);
+        QCOMPARE(code.blockFormat().bottomMargin(), qreal(0));
+        QTextBlock last = code.next();
+        QVERIFY(last.isValid());
+        QVERIFY(last.blockFormat().bottomMargin() > 0);
+        QCOMPARE(last.blockFormat().topMargin(), qreal(0));
+
+        // And it is set in a monospaced face, whatever the prose is in.
+        QCOMPARE(code.begin().fragment().charFormat().fontFamilies()
+                     .toStringList().value(0),
+                 QStringLiteral("iA Writer Mono S"));
     }
 
     void remembersLastSaveDirectory() {

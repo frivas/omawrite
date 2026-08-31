@@ -256,6 +256,25 @@ private:
     void refreshWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
+    // Fenced code sits on a panel. A character background only paints behind
+    // the glyphs, so it ends ragged at each line and leaves gaps through the
+    // leading; a block background fills the line.
+    void applyCodeBlockShading();
+    // The block formatting a rendered document needs: the editor's leading,
+    // paragraph spacing the markdown reader drops, and the panel behind code.
+    // Preview and print share it, or the page comes out set differently from
+    // what was on screen. forPrint takes the light palette: paper is white
+    // whatever the app's theme is.
+    void styleRenderedDocument(QTextDocument *document, bool forPrint) const;
+
+public:
+    // Exposed so a test can render exactly what the printer would.
+    void styleRenderedDocumentForTest(QTextDocument *document, bool forPrint) const {
+        styleRenderedDocument(document, forPrint);
+    }
+
+private:
+    int m_fenceLineCount = -1;
     void reapplyTypographyToChange();
     void scheduleRecovery();
     void persistDocument();
