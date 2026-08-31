@@ -62,6 +62,7 @@ also be set from a script:
 | `editor/caretBlink` | `true` | Blinks on the desktop's own flash time |
 | `editor/measureChars` | `65` | Characters per line, which is what sets the editor's margins |
 | `print/marginMm` | `20` | Margins on the printed page and on Save as PDF |
+| `editor/paragraphOnReturn` | `false` | Return breaks the line once; on, it opens a Markdown paragraph |
 | `editor/wordTarget` | `0` (off) | Footer counts towards it, and names a first-draft goal a quarter longer |
 | `editor/autosave` | `true` | See below |
 | `editor/autosaveDelayMs` | `750` | See below |

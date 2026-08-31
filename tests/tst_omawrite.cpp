@@ -835,6 +835,9 @@ private slots:
         };
         auto returnKey = [&] { QTest::keyClick(window, Qt::Key_Return); };
 
+        // Upstream's behaviour, which is opt-in here.
+        backend.setParagraphOnReturn(true);
+
         // Ending a paragraph leaves the blank line that separates it from the
         // next one.
         load(QStringLiteral("one\n\ntwo"), 8);
@@ -912,6 +915,10 @@ private slots:
         };
         auto returnKey = [&] { QTest::keyClick(window, Qt::Key_Return); };
         auto backspaceKey = [&] { QTest::keyClick(window, Qt::Key_Backspace); };
+
+        // This covers the Backspace that closes a paragraph break, so it needs
+        // Return to open one -- which is opt-in here.
+        backend.setParagraphOnReturn(true);
 
         // Backspace at the head of a paragraph closes the whole break above
         // it, so the two paragraphs join in one press rather than two, and
@@ -2066,6 +2073,60 @@ private slots:
         QVERIFY(line > 0);
         QCOMPARE(rendered->begin().blockFormat().bottomMargin(),
                  line * editorLeading / 100.0);
+    }
+
+    // By default Return breaks the line once. Opening a whole paragraph is a
+    // setting, because a Return that inserts a blank line surprises people.
+    void breaksTheLineOnceOnReturnByDefault() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QVERIFY(!backend.paragraphOnReturn());
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QVERIFY(editor->property("activeFocus").toBool());
+
+        auto text = [&] { return editor->property("text").toString(); };
+        auto load = [&](const QString &content, int position) {
+            editor->setProperty("text", content);
+            editor->setProperty("cursorPosition", position);
+        };
+        auto returnKey = [&] { QTest::keyClick(window, Qt::Key_Return); };
+
+        // The caret sits after a full stop: one break, not a blank line.
+        load(QStringLiteral("A sentence."), 11);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("A sentence.\n"));
+
+        // A second Return is how the blank line gets there, deliberately.
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("A sentence.\n\n"));
+
+        // Lists still continue themselves rather than breaking once.
+        load(QStringLiteral("- item"), 6);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- item\n- "));
+
+        // And the setting brings the paragraph behaviour back.
+        backend.setParagraphOnReturn(true);
+        load(QStringLiteral("A sentence."), 11);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("A sentence.\n\n"));
     }
 
     void remembersLastSaveDirectory() {

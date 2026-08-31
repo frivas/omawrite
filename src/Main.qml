@@ -1061,7 +1061,10 @@ ApplicationWindow {
                         replaceSelectionWith("\n");
                         return;
                     }
-                    replaceSelectionWith("\n\n");
+                    // Off by default: a Return that opens a whole paragraph
+                    // surprises anyone who just wanted the next line, and the
+                    // blank line is one more Return away when it is wanted.
+                    replaceSelectionWith(backend.paragraphOnReturn ? "\n\n" : "\n");
                 }
 
                 function escapeMarkdownLinkText(linkText) {

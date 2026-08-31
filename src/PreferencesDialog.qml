@@ -102,6 +102,13 @@ Dialog {
                 onValueModified: backend.wordTarget = value
             }
 
+            FieldLabel { text: "Return opens a paragraph" }
+            Switch {
+                objectName: "paragraphOnReturnSwitch"
+                checked: backend.paragraphOnReturn
+                onToggled: backend.paragraphOnReturn = checked
+            }
+
             SectionLabel { text: "Caret" }
 
             FieldLabel { text: "Shape" }
