@@ -61,6 +61,17 @@ Item {
                 context.closePath();
                 context.moveTo(10, 8);
                 context.arc(8, 8, 2, 0, Math.PI * 2);
+            } else if (control.iconName === "edit") {
+                // A pencil: shown while previewing, because the click goes
+                // back to the source rather than deeper into the preview.
+                context.moveTo(2.5, 13.5);
+                context.lineTo(3.5, 10.5);
+                context.lineTo(10.5, 3.5);
+                context.lineTo(12.5, 5.5);
+                context.lineTo(5.5, 12.5);
+                context.closePath();
+                context.moveTo(9.5, 4.5);
+                context.lineTo(11.5, 6.5);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);
