@@ -87,6 +87,53 @@ fi
 # library outside Qt. Omawrite does not use it; retaining SQLite is sufficient
 # for any Qt Quick local-storage dependency.
 rm -f "$APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
+
+# macdeployqt copies every plugin Qt ships, including ones whose frameworks
+# live in packages we do not have (QtPdf comes with qtwebengine; Qt3D and the
+# virtual keyboard with their own). A plugin whose framework is missing is
+# either never loaded -- dead weight -- or, if Qt does load it eagerly the way
+# it loads every image format, resolved through the build machine's Qt, which
+# drags a second copy of Qt into the process. That runs here and fails on any
+# other Mac, so prune them.
+prune_unsatisfiable() {
+  removed=0
+  for plugin in $(find "$APP/Contents/PlugIns" -name "*.dylib" 2>/dev/null); do
+    for wanted in $(otool -L "$plugin" 2>/dev/null | awk '{print $1}' \
+        | grep '^@rpath/Qt.*\.framework' \
+        | sed 's|^@rpath/\([^/]*\)\.framework.*|\1|' | sort -u); do
+      if [ ! -e "$APP/Contents/Frameworks/$wanted.framework" ]; then
+        echo "pruning $(basename "$plugin"): needs $wanted, which is not bundled"
+        rm -f "$plugin"
+        removed=1
+        break
+      fi
+    done
+  done
+  return $removed
+}
+
+# Pruning one plugin can leave another unsatisfiable, so repeat until settled.
+while prune_unsatisfiable; do :; done
+rm -rf "$APP/Contents/Resources/qml/QtQuick/Pdf"
+
+# Nothing may now reference a framework the bundle does not carry. Anything
+# left would be resolved against the build machine's Qt.
+missing=""
+for binary in $(find "$APP" -type f); do
+  file "$binary" 2>/dev/null | grep -q Mach-O || continue
+  for wanted in $(otool -L "$binary" 2>/dev/null | awk '{print $1}' \
+      | grep '^@rpath/Qt.*\.framework' \
+      | sed 's|^@rpath/\([^/]*\)\.framework.*|\1|' | sort -u); do
+    if [ ! -e "$APP/Contents/Frameworks/$wanted.framework" ]; then
+      missing="$missing $wanted"
+    fi
+  done
+done
+if [ -n "$missing" ]; then
+  echo "referenced but not bundled:$(echo "$missing" | tr ' ' '\n' | sort -u | tr '\n' ' ')" >&2
+  exit 1
+fi
+
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 
