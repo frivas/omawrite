@@ -124,6 +124,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     }
                 }
 
+                // Whatever is on disk now, it is not what we last read, so the
+                // baseline is unknown until the writer picks a version. A
+                // deletion counts: the old text is not saved anywhere either.
+                setKnownFileContents(QByteArray(), false);
                 emit externalChangeDetected(deleted, m_modified);
             });
 
@@ -273,8 +277,7 @@ void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
     const QByteArray contents = file.readAll();
     loadDocumentText(QString::fromUtf8(contents));
     clearRecovery();
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownFileContents(contents, true);
     m_pathNeverRead = false;
     setFileUrl(url);
     watchCurrentFile();
@@ -344,11 +347,9 @@ void Backend::reloadFromDisk() {
 void Backend::keepExternalVersion() {
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = file.readAll();
-        m_hasKnownFileContents = true;
+        setKnownFileContents(file.readAll(), true);
     } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
+        setKnownFileContents(QByteArray(), false);
     }
     // Answered, whether or not the file could be read. Failing to read it is
     // not a reason to ask again: the writer said to keep their version, and
@@ -491,9 +492,27 @@ bool Backend::editorTextChanged() {
     }
 
     scheduleWordCount();
-    setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
-    scheduleRecovery();
+
+    const QString &baseline = m_lastKnownFileText;
+    // An empty baseline means a pristine untitled document, but only when there
+    // is no file behind it. Once there is one, an unknown baseline is unknown
+    // rather than empty, and emptying the editor is a change like any other.
+    const bool baselineKnown = m_hasKnownFileContents
+        || !m_fileUrl.isValid() || m_fileUrl.isEmpty();
+
+    if (baselineKnown && text == baseline) {
+        setModified(false);
+        clearRecovery();
+        if (m_hasKnownFileContents)
+            setStatus(QStringLiteral("Saved %1").arg(fileName()));
+        else
+            setStatus(QString());
+    } else {
+        setModified(true);
+        setStatus(QStringLiteral("Unsaved"));
+        scheduleRecovery();
+    }
+
     return true;
 }
 
@@ -637,8 +656,7 @@ void Backend::saveTo(const QUrl &url) {
 
     const bool shouldClose = m_closeAfterSave;
     m_closeAfterSave = false;
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownFileContents(contents, true);
     m_pathNeverRead = false;
     setFileUrl(url);
     watchCurrentFile();
@@ -659,6 +677,14 @@ void Backend::scheduleRecovery() {
 
 QString Backend::recoveryPath() const {
     return m_recoveryPath;
+}
+
+void Backend::setKnownFileContents(const QByteArray &contents, bool known) {
+    m_lastKnownFileContents = contents;
+    m_hasKnownFileContents = known;
+    m_lastKnownFileText = known
+        ? QString::fromUtf8(contents).replace(QStringLiteral("\r\n"), QStringLiteral("\n"))
+        : QString();
 }
 
 void Backend::writeRecovery() {
@@ -690,16 +716,14 @@ void Backend::restoreRecovery() {
     const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
     QFile diskFile(recoveredUrl.toLocalFile());
     if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = diskFile.readAll();
-        m_hasKnownFileContents = true;
+        setKnownFileContents(diskFile.readAll(), true);
         // Reading it now says what is on the path, not that this document ever
         // looked: the file can have arrived while Omawrite was gone. Only the
         // snapshot knows, so a snapshot without the key predates the flag and
         // names a path something was written to.
         m_pathNeverRead = recovery.value(QStringLiteral("pathNeverRead")).toBool();
     } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
+        setKnownFileContents(QByteArray(), false);
         // A snapshot can name a file that was never written -- the crash came
         // first. That is the same unverified path a new file starts on.
         m_pathNeverRead = true;

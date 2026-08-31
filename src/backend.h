@@ -130,6 +130,7 @@ private:
     void restoreRecovery();
     void clearRecovery();
     QString recoveryPath() const;
+    void setKnownFileContents(const QByteArray &contents, bool known);
     void watchCurrentFile();
     void loadOmarchyTheme();
     void watchOmarchyTheme();
@@ -155,6 +156,7 @@ private:
     QPointer<MarkdownHighlighter> m_highlighter;
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
+    QString m_lastKnownFileText;
     bool m_hasKnownFileContents = false;
     // Set where this document takes a name without having read what is on it,
     // and cleared the moment anything settles the question -- a read, a write,
