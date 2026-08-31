@@ -2426,7 +2426,7 @@ private slots:
         // Both are baked in at build time, so an unknown here means the build
         // lost track of what it was built from.
         QVERIFY(!Backend::appVersion().isEmpty());
-        QCOMPARE(Backend::appVersion(), QStringLiteral("0.5.0-macos.1"));
+        QCOMPARE(Backend::appVersion(), QStringLiteral("0.5.0-macos.2"));
         QVERIFY(!Backend::appCommit().isEmpty());
         QVERIFY2(Backend::appCommit() != QStringLiteral("unknown"),
                  "the build did not record a commit");
