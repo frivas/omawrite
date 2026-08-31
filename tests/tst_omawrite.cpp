@@ -4,6 +4,7 @@
 #include <QQuickItem>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QPrinter>
 #include <QTextLayout>
@@ -1518,6 +1519,90 @@ private slots:
         QCOMPARE(backend.fileName(), QStringLiteral("chapter-one.md"));
         QCOMPARE(Backend::printJobName(backend.fileName()),
                  QStringLiteral("chapter-one"));
+    }
+
+    void fallsBackToTheBundledFaceForAFontTheSystemLacks() {
+        const QStringList available{QStringLiteral("Aptos"),
+                                    QStringLiteral("iA Writer Mono S")};
+        QCOMPARE(Backend::resolveFontFamily(QStringLiteral("Aptos"), available),
+                 QStringLiteral("Aptos"));
+        // Named in settings on another machine, absent here.
+        QCOMPARE(Backend::resolveFontFamily(QStringLiteral("Comic Sans MS"), available),
+                 QStringLiteral("iA Writer Mono S"));
+        QCOMPARE(Backend::resolveFontFamily(QString(), available),
+                 QStringLiteral("iA Writer Mono S"));
+    }
+
+    void remembersCaretAndMeasureAndPrintMargins() {
+        {
+            Backend backend;
+            QCOMPARE(backend.caretStyle(), QStringLiteral("line"));
+            QVERIFY(backend.caretBlink());
+            QCOMPARE(backend.editorMeasureChars(), 65);
+            QCOMPARE(backend.printMarginMm(), 20.0);
+
+            QSignalSpy caretSpy(&backend, &Backend::caretStyleChanged);
+            backend.setCaretStyle(QStringLiteral("block"));
+            QCOMPARE(caretSpy.count(), 1);
+            // Anything unrecognised means the default, never an empty caret.
+            backend.setCaretStyle(QStringLiteral("wedge"));
+            QCOMPARE(backend.caretStyle(), QStringLiteral("line"));
+            backend.setCaretStyle(QStringLiteral("block"));
+
+            backend.setCaretBlink(false);
+            backend.setEditorMeasureChars(80);
+            backend.setPrintMarginMm(12.5);
+
+            // Bounds hold on both ends.
+            backend.setEditorMeasureChars(5);
+            QCOMPARE(backend.editorMeasureChars(), 20);
+            backend.setEditorMeasureChars(9999);
+            QCOMPARE(backend.editorMeasureChars(), 200);
+            backend.setEditorMeasureChars(80);
+            backend.setPrintMarginMm(-4);
+            QCOMPARE(backend.printMarginMm(), 0.0);
+            backend.setPrintMarginMm(500);
+            QCOMPARE(backend.printMarginMm(), 60.0);
+            backend.setPrintMarginMm(12.5);
+        }
+
+        Backend restored;
+        QCOMPARE(restored.caretStyle(), QStringLiteral("block"));
+        QVERIFY(!restored.caretBlink());
+        QCOMPARE(restored.editorMeasureChars(), 80);
+        QCOMPARE(restored.printMarginMm(), 12.5);
+    }
+
+    void keepsTheEditorFontOnTheDocumentAndRemembersIt() {
+        // Switch away from whatever this machine resolved to by default, so
+        // the test is a real change rather than a no-op.
+        QString family;
+        {
+            Backend probe;
+            family = probe.editorFontFamily() == QStringLiteral("iA Writer Mono S")
+                ? QStringLiteral("Aptos")
+                : QStringLiteral("iA Writer Mono S");
+        }
+        if (family == QStringLiteral("Aptos")
+                && !QFontDatabase::families().contains(family)) {
+            QSKIP("no second family available to switch to");
+        }
+
+        {
+            Backend backend;
+            QQuickTextDocument *document = attachTextEdit(&backend);
+            QVERIFY(document);
+
+            QSignalSpy familySpy(&backend, &Backend::editorFontFamilyChanged);
+            backend.setEditorFontFamily(family);
+            QCOMPARE(backend.editorFontFamily(), family);
+            QCOMPARE(familySpy.count(), 1);
+            // The printed page is rendered from this document's font.
+            QCOMPARE(document->textDocument()->defaultFont().family(), family);
+        }
+
+        Backend restored;
+        QCOMPARE(restored.editorFontFamily(), family);
     }
 
     void remembersLastSaveDirectory() {

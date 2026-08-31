@@ -27,6 +27,14 @@ class Backend : public QObject {
     Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
     Q_PROPERTY(int editorFontSize READ editorFontSize WRITE setEditorFontSize
                NOTIFY editorFontSizeChanged)
+    Q_PROPERTY(QString editorFontFamily READ editorFontFamily WRITE setEditorFontFamily
+               NOTIFY editorFontFamilyChanged)
+    Q_PROPERTY(QString caretStyle READ caretStyle WRITE setCaretStyle NOTIFY caretStyleChanged)
+    Q_PROPERTY(bool caretBlink READ caretBlink WRITE setCaretBlink NOTIFY caretBlinkChanged)
+    Q_PROPERTY(int editorMeasureChars READ editorMeasureChars WRITE setEditorMeasureChars
+               NOTIFY editorMeasureCharsChanged)
+    Q_PROPERTY(qreal printMarginMm READ printMarginMm WRITE setPrintMarginMm
+               NOTIFY printMarginMmChanged)
     Q_PROPERTY(bool autosave READ autosave WRITE setAutosave NOTIFY autosaveChanged)
     Q_PROPERTY(int autosaveDelayMs READ autosaveDelayMs WRITE setAutosaveDelayMs
                NOTIFY autosaveDelayMsChanged)
@@ -72,6 +80,23 @@ public:
     void setTextScale(qreal textScale);
     int editorFontSize() const { return m_editorFontSize; }
     void setEditorFontSize(int editorFontSize);
+    QString editorFontFamily() const { return m_editorFontFamily; }
+    void setEditorFontFamily(const QString &family);
+    QString caretStyle() const { return m_caretStyle; }
+    void setCaretStyle(const QString &caretStyle);
+    bool caretBlink() const { return m_caretBlink; }
+    void setCaretBlink(bool caretBlink);
+    int editorMeasureChars() const { return m_editorMeasureChars; }
+    void setEditorMeasureChars(int measureChars);
+    qreal printMarginMm() const { return m_printMarginMm; }
+    void setPrintMarginMm(qreal marginMm);
+
+    // The family actually used: the request when the system has it, and the
+    // bundled face when it does not, so a font named in settings on one
+    // machine cannot leave another with a fallback nobody chose.
+    static QString resolveFontFamily(const QString &requested,
+                                     const QStringList &availableFamilies);
+
     bool autosave() const { return m_autosave; }
     void setAutosave(bool autosave);
     int autosaveDelayMs() const { return m_autosaveDelayMs; }
@@ -125,6 +150,11 @@ signals:
     void darkModeChanged();
     void textScaleChanged();
     void editorFontSizeChanged();
+    void editorFontFamilyChanged();
+    void caretStyleChanged();
+    void caretBlinkChanged();
+    void editorMeasureCharsChanged();
+    void printMarginMmChanged();
     void autosaveChanged();
     void autosaveDelayMsChanged();
     void themeColorsChanged();
@@ -167,6 +197,11 @@ private:
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
     int m_editorFontSize = 20;
+    QString m_editorFontFamily;
+    QString m_caretStyle;
+    bool m_caretBlink = true;
+    int m_editorMeasureChars = 65;
+    qreal m_printMarginMm = 20.0;
     bool m_autosave = true;
     int m_autosaveDelayMs = 750;
     // An outside edit the writer has not answered yet. Autosave must not pick

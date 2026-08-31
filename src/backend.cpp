@@ -13,6 +13,7 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QQuickTextDocument>
+#include <QFontDatabase>
 #include <QScreen>
 #include <QRegularExpression>
 #include <QSettings>
@@ -40,6 +41,20 @@ const QString editorFontSizeSetting = QStringLiteral("editor/fontSize");
 constexpr int defaultEditorFontSize = 20;
 constexpr int minimumEditorFontSize = 10;
 constexpr int maximumEditorFontSize = 48;
+const QString editorFontFamilySetting = QStringLiteral("editor/fontFamily");
+const QString caretStyleSetting = QStringLiteral("editor/caretStyle");
+const QString caretBlinkSetting = QStringLiteral("editor/caretBlink");
+const QString editorMeasureCharsSetting = QStringLiteral("editor/measureChars");
+const QString printMarginMmSetting = QStringLiteral("print/marginMm");
+// Bundled with the app, so it is the one family that is always there.
+const QString bundledFontFamily = QStringLiteral("iA Writer Mono S");
+// Chosen when nothing is configured and the system has it.
+const QString preferredFontFamily = QStringLiteral("Aptos");
+constexpr int defaultEditorMeasureChars = 65;
+constexpr int minimumEditorMeasureChars = 20;
+constexpr int maximumEditorMeasureChars = 200;
+constexpr qreal defaultPrintMarginMm = 20.0;
+constexpr qreal maximumPrintMarginMm = 60.0;
 const QString autosaveSetting = QStringLiteral("editor/autosave");
 const QString autosaveDelaySetting = QStringLiteral("editor/autosaveDelayMs");
 constexpr int defaultAutosaveDelayMs = 750;
@@ -122,6 +137,27 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
+    const QStringList families = QFontDatabase::families();
+    const QString requestedFamily =
+        QSettings().value(editorFontFamilySetting).toString();
+    m_editorFontFamily = requestedFamily.isEmpty()
+        ? (families.contains(preferredFontFamily) ? preferredFontFamily
+                                                  : bundledFontFamily)
+        : resolveFontFamily(requestedFamily, families);
+    m_caretStyle = QSettings().value(caretStyleSetting,
+                                     QStringLiteral("line")).toString()
+                   == QStringLiteral("block")
+        ? QStringLiteral("block")
+        : QStringLiteral("line");
+    m_caretBlink = QSettings().value(caretBlinkSetting, true).toBool();
+    m_editorMeasureChars = qBound(minimumEditorMeasureChars,
+                                  QSettings().value(editorMeasureCharsSetting,
+                                                    defaultEditorMeasureChars).toInt(),
+                                  maximumEditorMeasureChars);
+    m_printMarginMm = qBound(qreal(0), QSettings().value(printMarginMmSetting,
+                                                         defaultPrintMarginMm).toDouble(),
+                             maximumPrintMarginMm);
+
     m_autosave = QSettings().value(autosaveSetting, true).toBool();
     m_autosaveDelayMs = qBound(minimumAutosaveDelayMs,
                                QSettings().value(autosaveDelaySetting,
@@ -213,6 +249,71 @@ void Backend::setEditorFontSize(int editorFontSize) {
     m_editorFontSize = boundedSize;
     QSettings().setValue(editorFontSizeSetting, m_editorFontSize);
     emit editorFontSizeChanged();
+}
+
+QString Backend::resolveFontFamily(const QString &requested,
+                                   const QStringList &availableFamilies) {
+    if (!requested.isEmpty() && availableFamilies.contains(requested))
+        return requested;
+
+    return bundledFontFamily;
+}
+
+void Backend::setEditorFontFamily(const QString &family) {
+    const QString resolved = resolveFontFamily(family, QFontDatabase::families());
+    if (m_editorFontFamily == resolved)
+        return;
+
+    m_editorFontFamily = resolved;
+    QSettings().setValue(editorFontFamilySetting, m_editorFontFamily);
+    if (m_document) {
+        QFont font = m_document->defaultFont();
+        font.setFamily(m_editorFontFamily);
+        m_document->setDefaultFont(font);
+    }
+    emit editorFontFamilyChanged();
+}
+
+void Backend::setCaretStyle(const QString &caretStyle) {
+    const QString normalized = caretStyle == QStringLiteral("block")
+        ? QStringLiteral("block")
+        : QStringLiteral("line");
+    if (m_caretStyle == normalized)
+        return;
+
+    m_caretStyle = normalized;
+    QSettings().setValue(caretStyleSetting, m_caretStyle);
+    emit caretStyleChanged();
+}
+
+void Backend::setCaretBlink(bool caretBlink) {
+    if (m_caretBlink == caretBlink)
+        return;
+
+    m_caretBlink = caretBlink;
+    QSettings().setValue(caretBlinkSetting, m_caretBlink);
+    emit caretBlinkChanged();
+}
+
+void Backend::setEditorMeasureChars(int measureChars) {
+    const int bounded = qBound(minimumEditorMeasureChars, measureChars,
+                               maximumEditorMeasureChars);
+    if (m_editorMeasureChars == bounded)
+        return;
+
+    m_editorMeasureChars = bounded;
+    QSettings().setValue(editorMeasureCharsSetting, m_editorMeasureChars);
+    emit editorMeasureCharsChanged();
+}
+
+void Backend::setPrintMarginMm(qreal marginMm) {
+    const qreal bounded = qBound(qreal(0), marginMm, maximumPrintMarginMm);
+    if (qFuzzyCompare(m_printMarginMm, bounded))
+        return;
+
+    m_printMarginMm = bounded;
+    QSettings().setValue(printMarginMmSetting, m_printMarginMm);
+    emit printMarginMmChanged();
 }
 
 void Backend::setAutosave(bool autosave) {
@@ -453,10 +554,20 @@ void Backend::printDocument() {
         dialog.windowHandle()->setTransientParent(m_parentWindow);
 
     if (dialog.exec() == QDialog::Accepted) {
+        QPageLayout layout = printer.pageLayout();
+        layout.setUnits(QPageLayout::Millimeter);
+        layout.setMargins(QMarginsF(m_printMarginMm, m_printMarginMm,
+                                    m_printMarginMm, m_printMarginMm));
+        printer.setPageLayout(layout);
+
         QTextDocument rendered;
         const QScreen *screen = QGuiApplication::primaryScreen();
-        rendered.setDefaultFont(printFont(m_document->defaultFont(),
-                                          screen ? screen->logicalDotsPerInchY() : 0.0));
+        QFont printed = printFont(m_document->defaultFont(),
+                                  screen ? screen->logicalDotsPerInchY() : 0.0);
+        // The page follows the editor, so what is printed reads as what was
+        // written rather than as a different document.
+        printed.setFamily(m_editorFontFamily);
+        rendered.setDefaultFont(printed);
         rendered.setMarkdown(currentDocumentText());
         rendered.print(&printer);
     }
