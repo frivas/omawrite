@@ -121,8 +121,7 @@ int main(int argc, char *argv[]) {
         const bool alreadyShowingFile = backend.fileUrl().isValid()
             && !backend.fileUrl().isEmpty();
         if (backend.modified() || alreadyShowingFile) {
-            QProcess::startDetached(QCoreApplication::applicationFilePath(),
-                                    QStringList{url.toLocalFile()});
+            Backend::launchNewInstance(url.toLocalFile());
         } else {
             backend.open(url);
         }

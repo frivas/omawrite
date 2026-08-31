@@ -376,6 +376,19 @@ private slots:
         QCOMPARE(window->property("closeConfirmed").toBool(), false);
     }
 
+    void findsTheAppBundleAroundAMacExecutable() {
+        QCOMPARE(Backend::enclosingBundlePath(
+                     QStringLiteral("/Applications/Omawrite.app/Contents/MacOS")),
+                 QStringLiteral("/Applications/Omawrite.app"));
+
+        // A bare executable, as on Linux or in an unbundled test build.
+        QVERIFY(Backend::enclosingBundlePath(QStringLiteral("/usr/bin")).isEmpty());
+        QVERIFY(Backend::enclosingBundlePath(QStringLiteral("/tmp/build")).isEmpty());
+        // The right layout, but the top directory is not a bundle.
+        QVERIFY(Backend::enclosingBundlePath(
+                    QStringLiteral("/tmp/omawrite/Contents/MacOS")).isEmpty());
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
