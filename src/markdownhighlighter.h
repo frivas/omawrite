@@ -53,7 +53,11 @@ public:
     // What a run of code inside a fence is made of. Comments, strings and
     // numbers are found the same way in every language; only the keywords and
     // the comment marker differ, which is what the language table holds.
-    enum class CodeToken { Comment, String, Number, Keyword };
+    // Function covers the thing being invoked: the command a shell line
+    // starts with, and a name called with parentheses anywhere else. Without
+    // it a shell snippet -- which is mostly commands and paths -- comes out
+    // entirely unhighlighted.
+    enum class CodeToken { Comment, String, Number, Keyword, Function };
 
     struct CodeSpanToken {
         int start;
@@ -102,6 +106,7 @@ private:
     QTextCharFormat m_codeStringFormat;
     QTextCharFormat m_codeNumberFormat;
     QTextCharFormat m_codeKeywordFormat;
+    QTextCharFormat m_codeFunctionFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QString m_searchQuery;
