@@ -27,6 +27,9 @@ class Backend : public QObject {
     Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
     Q_PROPERTY(int editorFontSize READ editorFontSize WRITE setEditorFontSize
                NOTIFY editorFontSizeChanged)
+    Q_PROPERTY(bool autosave READ autosave WRITE setAutosave NOTIFY autosaveChanged)
+    Q_PROPERTY(int autosaveDelayMs READ autosaveDelayMs WRITE setAutosaveDelayMs
+               NOTIFY autosaveDelayMsChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
@@ -64,6 +67,18 @@ public:
     void setTextScale(qreal textScale);
     int editorFontSize() const { return m_editorFontSize; }
     void setEditorFontSize(int editorFontSize);
+    bool autosave() const { return m_autosave; }
+    void setAutosave(bool autosave);
+    int autosaveDelayMs() const { return m_autosaveDelayMs; }
+    void setAutosaveDelayMs(int autosaveDelayMs);
+
+    // Whether the debounce may write the document's own file, rather than the
+    // recovery snapshot. Exposed so the guardrails can be tested directly.
+    bool canAutosaveToFile() const;
+
+    // Where this window's crash snapshot lives. Public so a test can read the
+    // snapshot from the slot this backend actually claimed.
+    QString recoveryPath() const;
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
@@ -105,6 +120,8 @@ signals:
     void darkModeChanged();
     void textScaleChanged();
     void editorFontSizeChanged();
+    void autosaveChanged();
+    void autosaveDelayMsChanged();
     void themeColorsChanged();
     void closeAfterSave();
     void openDialogRequested();
@@ -129,10 +146,10 @@ private:
     void applyDocumentTypography();
     void reapplyTypographyToChange();
     void scheduleRecovery();
+    void persistDocument();
     void writeRecovery();
     void restoreRecovery();
     void clearRecovery();
-    QString recoveryPath() const;
     void setKnownFileContents(const QByteArray &contents, bool known);
     void watchCurrentFile();
     void loadOmarchyTheme();
@@ -145,6 +162,11 @@ private:
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
     int m_editorFontSize = 20;
+    bool m_autosave = true;
+    int m_autosaveDelayMs = 750;
+    // An outside edit the writer has not answered yet. Autosave must not pick
+    // a version for them while that dialog is standing.
+    bool m_externalChangeUnanswered = false;
     bool m_loading = false;
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;

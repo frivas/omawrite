@@ -2,6 +2,8 @@
 #include <QFont>
 #include <QColor>
 #include <QQuickItem>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QFontMetricsF>
 #include <QPrinter>
 #include <QTextLayout>
@@ -1277,6 +1279,207 @@ private slots:
                 >= footer->mapToScene(QPointF()).y());
         QCOMPARE(editorViewport->mapToScene(QPointF(0, editorViewport->height())).y(),
                  footer->mapToScene(QPointF()).y());
+    }
+
+    // Autosave is on by default: a named file follows the writer without a
+    // Ctrl+S, once the debounce settles.
+    void autosavesANamedFileOnceTypingStops() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+        {
+            QFile seed(path);
+            QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+            seed.write("first\n");
+        }
+
+        Backend backend;
+        QVERIFY(backend.autosave());
+        backend.setAutosaveDelayMs(200);
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+        backend.open(QUrl::fromLocalFile(path));
+
+        document->textDocument()->setPlainText(QStringLiteral("second"));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+        QTRY_VERIFY_WITH_TIMEOUT(savedSpy.count() == 1, 3000);
+        QVERIFY(!backend.modified());
+
+        QFile written(path);
+        QVERIFY(written.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(written.readAll()).trimmed(),
+                 QStringLiteral("second"));
+    }
+
+    // An untitled draft has nowhere to be saved, so it keeps getting the
+    // snapshot instead -- and no file is invented for it.
+    void snapshotsUntitledDocumentsInsteadOfSavingThem() {
+        Backend backend;
+        backend.setAutosaveDelayMs(200);
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+
+        QVERIFY(!backend.canAutosaveToFile());
+        document->textDocument()->setPlainText(QStringLiteral("a scratch note"));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(backend.recoveryPath()), 3000);
+        QVERIFY(backend.modified());
+
+        QFile snapshot(backend.recoveryPath());
+        QVERIFY(snapshot.open(QIODevice::ReadOnly));
+        const QJsonObject saved =
+            QJsonDocument::fromJson(snapshot.readAll()).object();
+        QCOMPARE(saved.value(QStringLiteral("text")).toString(),
+                 QStringLiteral("a scratch note"));
+        QVERIFY(saved.value(QStringLiteral("fileUrl")).toString().isEmpty());
+    }
+
+    // The guardrail that matters most: something else changed the file and the
+    // writer has not said which version wins. Autosave must not answer for them.
+    void doesNotAutosaveOverAnUnansweredExternalChange() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+        {
+            QFile seed(path);
+            QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+            seed.write("mine\n");
+        }
+
+        Backend backend;
+        backend.setAutosaveDelayMs(200);
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(backend.canAutosaveToFile());
+
+        document->textDocument()->setPlainText(QStringLiteral("my edit"));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+
+        QSignalSpy externalSpy(&backend, &Backend::externalChangeDetected);
+        {
+            QFile outside(path);
+            QVERIFY(outside.open(QIODevice::WriteOnly | QIODevice::Text));
+            outside.write("theirs\n");
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(externalSpy.count() >= 1, 5000);
+
+        QVERIFY(!backend.canAutosaveToFile());
+
+        // Give the debounce every chance to fire, then check it did not.
+        QTest::qWait(600);
+        QFile onDisk(path);
+        QVERIFY(onDisk.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(onDisk.readAll()).trimmed(),
+                 QStringLiteral("theirs"));
+        QVERIFY(backend.modified());
+
+        // Once they answer, autosave is allowed again.
+        backend.keepExternalVersion();
+        QVERIFY(backend.canAutosaveToFile());
+    }
+
+    // A name taken for a file that was not there yet is unguarded until the
+    // first explicit save, so autosave leaves that path alone entirely.
+    void doesNotAutosaveOntoANeverReadPath() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("later.md"));
+
+        Backend backend;
+        backend.setAutosaveDelayMs(200);
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path));
+        // The name is taken, but nothing has read that path, so autosave holds
+        // off until the writer has saved there once themselves.
+        QVERIFY(!backend.canAutosaveToFile());
+
+        {
+            QFile appeared(path);
+            QVERIFY(appeared.open(QIODevice::WriteOnly | QIODevice::Text));
+            appeared.write("someone else got here first\n");
+        }
+        QVERIFY(!backend.canAutosaveToFile());
+
+        document->textDocument()->setPlainText(QStringLiteral("my draft"));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+        QTest::qWait(600);
+
+        QFile onDisk(path);
+        QVERIFY(onDisk.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(onDisk.readAll()).trimmed(),
+                 QStringLiteral("someone else got here first"));
+
+        // An explicit save still asks rather than replacing it unseen.
+        QSignalSpy appearedSpy(&backend, &Backend::externalFileAppeared);
+        backend.save();
+        QCOMPARE(appearedSpy.count(), 1);
+    }
+
+    void turnsAutosaveOffAndRemembersIt() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+        {
+            QFile seed(path);
+            QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+            seed.write("first\n");
+        }
+
+        {
+            Backend backend;
+            QVERIFY(backend.autosave());
+            QSignalSpy changedSpy(&backend, &Backend::autosaveChanged);
+            backend.setAutosave(false);
+            QCOMPARE(changedSpy.count(), 1);
+
+            backend.setAutosaveDelayMs(200);
+            QQuickTextDocument *document = attachTextEdit(&backend);
+            QVERIFY(document);
+            backend.open(QUrl::fromLocalFile(path));
+            QVERIFY(!backend.canAutosaveToFile());
+
+            document->textDocument()->setPlainText(QStringLiteral("second"));
+            backend.editorTextChanged();
+            QVERIFY(backend.modified());
+            // The snapshot still happens: turning autosave off is not a choice
+            // to lose work on a crash.
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(backend.recoveryPath()), 3000);
+
+            QFile onDisk(path);
+            QVERIFY(onDisk.open(QIODevice::ReadOnly | QIODevice::Text));
+            QCOMPARE(QString::fromUtf8(onDisk.readAll()).trimmed(),
+                     QStringLiteral("first"));
+        }
+
+        Backend restored;
+        QVERIFY(!restored.autosave());
+    }
+
+    void boundsTheAutosaveDelayAndRemembersIt() {
+        {
+            Backend backend;
+            QCOMPARE(backend.autosaveDelayMs(), 750);
+            backend.setAutosaveDelayMs(5);
+            QCOMPARE(backend.autosaveDelayMs(), 200);
+            backend.setAutosaveDelayMs(999999);
+            QCOMPARE(backend.autosaveDelayMs(), 60000);
+            backend.setAutosaveDelayMs(2000);
+            QCOMPARE(backend.autosaveDelayMs(), 2000);
+        }
+
+        Backend restored;
+        QCOMPARE(restored.autosaveDelayMs(), 2000);
     }
 
     void remembersLastSaveDirectory() {
