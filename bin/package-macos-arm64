@@ -114,6 +114,20 @@ prune_unsatisfiable() {
 
 # Pruning one plugin can leave another unsatisfiable, so repeat until settled.
 while prune_unsatisfiable; do :; done
+
+# The QML modules symlink to the plugins rather than carrying their own copy,
+# so pruning leaves the links dangling, and codesign refuses to verify a bundle
+# that lists a file which is not there. Take the module the link belonged to
+# with it: nothing imports a module whose plugin has gone.
+while [ -n "$(find "$APP" -type l ! -exec test -e {} \; -print 2>/dev/null | head -1)" ]; do
+  find "$APP" -type l ! -exec test -e {} \; -print 2>/dev/null | while read -r link; do
+    case "$(dirname "$link")" in
+      */Contents/Resources/qml/*) rm -rf "$(dirname "$link")" ;;
+      *) rm -f "$link" ;;
+    esac
+  done
+done
+find "$APP/Contents/PlugIns" -type d -empty -delete 2>/dev/null || true
 rm -rf "$APP/Contents/Resources/qml/QtQuick/Pdf"
 
 # Nothing may now reference a framework the bundle does not carry. Anything
