@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Dialogs as Dialogs
+// The only route to a real macOS menu bar from QML. On other platforms the
+// items simply go into an in-window bar.
+import Qt.labs.platform as Platform
 import QtQuick.Layouts
 import QtQuick.Window
 import "EditorMutations.js" as EditorMutations
@@ -416,6 +419,182 @@ ApplicationWindow {
         }
     }
 
+    // Menu items carry their own key equivalents. On macOS AppKit consumes
+    // those before Qt sees them, so the Shortcut elements above stay as the
+    // reference the shortcuts dialog reads; both call the same functions.
+    Platform.MenuBar {
+        Platform.Menu {
+            title: "Omawrite"
+
+            Platform.MenuItem {
+                text: "Preferences\u2026"
+                role: Platform.MenuItem.PreferencesRole
+                shortcut: "Ctrl+,"
+                onTriggered: preferencesDialog.open()
+            }
+        }
+
+        Platform.Menu {
+            title: "File"
+
+            Platform.MenuItem {
+                text: "New Window"
+                shortcut: StandardKey.New
+                onTriggered: backend.newWindow()
+            }
+            Platform.MenuItem {
+                text: "Open\u2026"
+                shortcut: StandardKey.Open
+                onTriggered: backend.openDialog()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Save"
+                shortcut: StandardKey.Save
+                onTriggered: backend.save()
+            }
+            Platform.MenuItem {
+                text: "Save As\u2026"
+                shortcut: StandardKey.SaveAs
+                onTriggered: backend.saveAsDialog()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Print\u2026"
+                shortcut: StandardKey.Print
+                onTriggered: backend.printDocument()
+            }
+        }
+
+        Platform.Menu {
+            title: "Edit"
+
+            Platform.MenuItem {
+                text: "Undo"
+                shortcut: StandardKey.Undo
+                onTriggered: editor.undo()
+            }
+            Platform.MenuItem {
+                text: "Redo"
+                shortcut: StandardKey.Redo
+                onTriggered: editor.redo()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Bold"
+                shortcut: StandardKey.Bold
+                onTriggered: editor.wrapSelection("**", "**")
+            }
+            Platform.MenuItem {
+                text: "Italic"
+                shortcut: StandardKey.Italic
+                onTriggered: editor.wrapSelection("*", "*")
+            }
+            Platform.MenuItem {
+                text: "Link"
+                shortcut: "Ctrl+K"
+                onTriggered: editor.insertLink()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Find"
+                shortcut: StandardKey.Find
+                onTriggered: {
+                    win.searchOpen = true;
+                    searchField.forceActiveFocus();
+                    searchField.selectAll();
+                }
+            }
+            Platform.MenuItem {
+                text: "Find and Replace"
+                shortcut: replaceShortcut.sequence
+                onTriggered: {
+                    win.searchOpen = true;
+                    win.replaceOpen = true;
+                    searchField.forceActiveFocus();
+                    searchField.selectAll();
+                }
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Move Paragraph Up"
+                shortcut: "Alt+Up"
+                onTriggered: win.moveParagraph(-1)
+            }
+            Platform.MenuItem {
+                text: "Move Paragraph Down"
+                shortcut: "Alt+Down"
+                onTriggered: win.moveParagraph(1)
+            }
+            Platform.MenuItem {
+                text: "Sentences on Their Own Lines"
+                shortcut: "Ctrl+L"
+                onTriggered: win.toggleSentenceLines()
+            }
+        }
+
+        Platform.Menu {
+            title: "View"
+
+            Platform.MenuItem {
+                text: "Preview"
+                shortcut: "Ctrl+/"
+                onTriggered: win.togglePreview()
+            }
+            Platform.MenuItem {
+                text: "Outline"
+                shortcut: "Ctrl+Shift+O"
+                onTriggered: outlineDialog.open()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Increase Text Size"
+                shortcut: StandardKey.ZoomIn
+                onTriggered: backend.editorFontSize += 2
+            }
+            Platform.MenuItem {
+                text: "Decrease Text Size"
+                shortcut: StandardKey.ZoomOut
+                onTriggered: backend.editorFontSize -= 2
+            }
+            Platform.MenuItem {
+                text: "Reset Text Size"
+                shortcut: "Ctrl+0"
+                onTriggered: backend.resetEditorFontSize()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Full Screen"
+                shortcut: fullscreenShortcut.sequence
+                onTriggered: win.toggleFullScreen()
+            }
+            Platform.MenuItem {
+                text: "Keyboard Shortcuts"
+                shortcut: "Ctrl+?"
+                onTriggered: shortcutsDialog.open()
+            }
+        }
+    }
+
+    PreferencesDialog {
+        id: preferencesDialog
+        darkMode: win.darkMode
+        textScale: win.textScale
+        textColor: win.textColor
+        mutedColor: win.mutedColor
+        fontFamily: backend.editorFontFamily
+        fontFamilies: backend.availableFontFamilies()
+        maxContentHeight: Math.max(240, win.height - 200)
+        preferredWidth: Math.max(320, win.width - 80)
+    }
+
+    Shortcut {
+        id: preferencesShortcut
+        sequence: "Ctrl+,"
+        context: Qt.ApplicationShortcut
+        onActivated: preferencesDialog.open()
+    }
+
     Dialogs.FileDialog {
         id: openFileDialog
         title: "Open File"
@@ -499,6 +678,7 @@ ApplicationWindow {
                 + zoomResetShortcut.nativeText + "  Reset text size\n"
                 + printShortcut.nativeText + "  Print\n"
                 + fullscreenShortcut.nativeText + "  Fullscreen\n"
+                + preferencesShortcut.nativeText + "  Preferences\n"
                 + helpShortcut.nativeText + "  Shortcuts"
             lineHeight: 1.5
         }
