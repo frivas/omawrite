@@ -304,6 +304,14 @@ ApplicationWindow {
                 win.completePendingAction();
         }
 
+        // A save that does not happen drops the intent with it, the way the
+        // backend drops its own close latch. Otherwise the close stays pending
+        // and any later successful save carries it out.
+        function onSaveFailed() {
+            win.awaitingPendingSave = false;
+            win.pendingAction = "";
+        }
+
         function onExternalChangeDetected(deleted, locallyModified) {
             externalChangeDialog.deleted = deleted;
             externalChangeDialog.locallyModified = locallyModified;

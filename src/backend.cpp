@@ -507,6 +507,7 @@ void Backend::saveTo(const QUrl &url) {
     if (!url.isLocalFile()) {
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Only local files can be saved."));
+        emit saveFailed();
         return;
     }
 
@@ -515,6 +516,7 @@ void Backend::saveTo(const QUrl &url) {
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Could not save %1.").arg(targetName));
+        emit saveFailed();
         return;
     }
 
@@ -533,6 +535,7 @@ void Backend::saveTo(const QUrl &url) {
         watchCurrentFile();
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Could not write %1.").arg(targetName));
+        emit saveFailed();
         return;
     }
 

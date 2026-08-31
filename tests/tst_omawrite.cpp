@@ -323,6 +323,59 @@ private slots:
         QVERIFY(printedMetrics.height() > rawMetrics.height() * 4);
     }
 
+    // Issue #23: a save that does not happen used to leave pendingAction at
+    // "close", so the next successful save closed the window.
+    void dropsThePendingCloseWhenASaveFails() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir documentDirectory;
+        QVERIFY(documentDirectory.isValid());
+        const QString documentPath = documentDirectory.filePath(QStringLiteral("doc.md"));
+        {
+            QFile seed(documentPath);
+            QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+            seed.write("draft\n");
+        }
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        backend.open(QUrl::fromLocalFile(documentPath));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(documentPath));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("draft plus more"));
+        QVERIFY(backend.modified());
+
+        // Put a directory where the file was, so the save fails for any uid.
+        QVERIFY(QFile::remove(documentPath));
+        QVERIFY(QDir().mkpath(documentPath));
+
+        // What the unsaved-changes dialog's Save button does.
+        window->setProperty("pendingAction", QStringLiteral("close"));
+        window->setProperty("awaitingPendingSave", true);
+        backend.save();
+
+        QVERIFY(backend.status().startsWith(QStringLiteral("Could not")));
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QCOMPARE(window->property("awaitingPendingSave").toBool(), false);
+        QCOMPARE(window->property("closeConfirmed").toBool(), false);
+
+        // An ordinary save minutes later must not carry out that close.
+        QVERIFY(QDir().rmdir(documentPath));
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+        backend.save();
+        QCOMPARE(savedSpy.count(), 1);
+        QCOMPARE(window->property("closeConfirmed").toBool(), false);
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
