@@ -24,7 +24,17 @@ public:
 
     // Carried from block to block so a fenced run of code knows it is inside
     // one. Stored on the block, which is where Backend::hiddenRangesAt reads it.
+    // Prose or inside a fence, with the language index packed above so every
+    // line of a fenced run knows what it is written in.
     enum BlockState { Prose = 0, InsideFence = 1 };
+    static constexpr int LanguageShift = 8;
+
+    // The state carries the language above the flag, so it must be asked
+    // rather than compared: a fence that names a language does not equal
+    // InsideFence on its own.
+    static bool isInsideFence(int blockState) {
+        return blockState > 0 && (blockState & InsideFence) != 0;
+    }
 
     struct InlineMarkup {
         InlineKind kind;
@@ -40,6 +50,31 @@ public:
     // Inline code spans, backticks included.
     static QList<Span> codeSpans(const QString &text);
 
+    // What a run of code inside a fence is made of. Comments, strings and
+    // numbers are found the same way in every language; only the keywords and
+    // the comment marker differ, which is what the language table holds.
+    enum class CodeToken { Comment, String, Number, Keyword };
+
+    struct CodeSpanToken {
+        int start;
+        int length;
+        CodeToken token;
+    };
+
+    // The language a fence opens with, reduced to one the tokeniser knows:
+    // "```py" and "```python" are the same thing, and anything unknown comes
+    // back empty and is styled as plain code.
+    static QString languageForFence(const QString &fenceLine);
+
+    // Tokenises one line of code. Deliberately line-at-a-time: a string or a
+    // comment that runs across lines is rare in a snippet and not worth the
+    // state to track.
+    static QList<CodeSpanToken> codeTokens(const QString &line, const QString &language);
+
+    // The languages the tokeniser knows, in the order the block state indexes
+    // them. One-based in the state, so zero can mean "plain code".
+    static QStringList codeLanguages();
+
 protected:
     void highlightBlock(const QString &text) override;
 
@@ -49,6 +84,7 @@ private:
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
+    void highlightCode(const QString &text, const QString &language);
 
     bool m_darkMode = true;
     QString m_customBackground;
@@ -62,6 +98,10 @@ private:
     QTextCharFormat m_italicFormat;
     QTextCharFormat m_codeFormat;
     QTextCharFormat m_fenceFormat;
+    QTextCharFormat m_codeCommentFormat;
+    QTextCharFormat m_codeStringFormat;
+    QTextCharFormat m_codeNumberFormat;
+    QTextCharFormat m_codeKeywordFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QString m_searchQuery;

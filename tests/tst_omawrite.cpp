@@ -136,11 +136,13 @@ private slots:
         const auto stateOf = [&document](int blockNumber) {
             return document.findBlockByNumber(blockNumber).userState();
         };
-        QCOMPARE(stateOf(0), int(MarkdownHighlighter::Prose));
-        QCOMPARE(stateOf(1), int(MarkdownHighlighter::InsideFence));
-        QCOMPARE(stateOf(2), int(MarkdownHighlighter::InsideFence));
-        QCOMPARE(stateOf(3), int(MarkdownHighlighter::Prose));
-        QCOMPARE(stateOf(4), int(MarkdownHighlighter::Prose));
+        // The state also carries the fence's language, so ask rather than
+        // compare -- "```ruby" does not leave the flag standing alone.
+        QVERIFY(!MarkdownHighlighter::isInsideFence(stateOf(0)));
+        QVERIFY(MarkdownHighlighter::isInsideFence(stateOf(1)));
+        QVERIFY(MarkdownHighlighter::isInsideFence(stateOf(2)));
+        QVERIFY(!MarkdownHighlighter::isInsideFence(stateOf(3)));
+        QVERIFY(!MarkdownHighlighter::isInsideFence(stateOf(4)));
 
         // The fenced line sits on the code panel, with nothing italic and no
         // marker hidden.
@@ -2127,6 +2129,104 @@ private slots:
         load(QStringLiteral("A sentence."), 11);
         returnKey();
         QCOMPARE(text(), QStringLiteral("A sentence.\n\n"));
+    }
+
+    void readsTheLanguageOffTheFence() {
+        QCOMPARE(MarkdownHighlighter::languageForFence(QStringLiteral("```python")),
+                 QStringLiteral("python"));
+        // Aliases land on the same rules.
+        QCOMPARE(MarkdownHighlighter::languageForFence(QStringLiteral("```py")),
+                 QStringLiteral("python"));
+        QCOMPARE(MarkdownHighlighter::languageForFence(QStringLiteral("```ts")),
+                 QStringLiteral("javascript"));
+        QCOMPARE(MarkdownHighlighter::languageForFence(QStringLiteral("   ```Bash ")),
+                 QStringLiteral("bash"));
+        // A bare fence, or one naming something unknown, is plain code.
+        QVERIFY(MarkdownHighlighter::languageForFence(QStringLiteral("```")).isEmpty());
+        QVERIFY(MarkdownHighlighter::languageForFence(
+                    QStringLiteral("```brainfuck")).isEmpty());
+        // Every language the state can index is resolvable.
+        for (const QString &language : MarkdownHighlighter::codeLanguages()) {
+            QCOMPARE(MarkdownHighlighter::languageForFence(
+                         QStringLiteral("```") + language), language);
+        }
+    }
+
+    void tokenisesCodeInsideAFence() {
+        using Token = MarkdownHighlighter::CodeToken;
+        auto tokens = [](const QString &line, const QString &language) {
+            return MarkdownHighlighter::codeTokens(line, language);
+        };
+        auto textOf = [](const QString &line,
+                         const MarkdownHighlighter::CodeSpanToken &token) {
+            return line.mid(token.start, token.length);
+        };
+
+        const QString shell = QStringLiteral("export NAME=\"omawrite\"  # a comment");
+        const auto shellTokens = tokens(shell, QStringLiteral("bash"));
+        QCOMPARE(shellTokens.size(), 3);
+        QCOMPARE(shellTokens.at(0).token, Token::Keyword);
+        QCOMPARE(textOf(shell, shellTokens.at(0)), QStringLiteral("export"));
+        QCOMPARE(shellTokens.at(1).token, Token::String);
+        QCOMPARE(textOf(shell, shellTokens.at(1)), QStringLiteral("\"omawrite\""));
+        QCOMPARE(shellTokens.at(2).token, Token::Comment);
+        QCOMPARE(textOf(shell, shellTokens.at(2)), QStringLiteral("# a comment"));
+
+        // A comment takes the rest of the line, so nothing after it is code.
+        const QString commented = QStringLiteral("x = 1  // return 42");
+        const auto commentedTokens = tokens(commented, QStringLiteral("javascript"));
+        QCOMPARE(commentedTokens.size(), 2);
+        QCOMPARE(commentedTokens.at(1).token, Token::Comment);
+
+        // A number is a number, but not when it is part of a name.
+        const QString numbers = QStringLiteral("let sha256 = 3.5");
+        const auto numberTokens = tokens(numbers, QStringLiteral("javascript"));
+        QCOMPARE(numberTokens.size(), 2);
+        QCOMPARE(numberTokens.at(0).token, Token::Keyword);
+        QCOMPARE(numberTokens.at(1).token, Token::Number);
+        QCOMPARE(textOf(numbers, numberTokens.at(1)), QStringLiteral("3.5"));
+
+        // An unterminated quote takes the rest of the line, which is how it
+        // looks on screen anyway.
+        const QString unterminated = QStringLiteral("echo \"unclosed");
+        const auto unterminatedTokens = tokens(unterminated, QStringLiteral("bash"));
+        QCOMPARE(unterminatedTokens.size(), 2);
+        QCOMPARE(textOf(unterminated, unterminatedTokens.at(1)),
+                 QStringLiteral("\"unclosed"));
+
+        // No language, no tokens: plain code stays plain.
+        QVERIFY(tokens(shell, QString()).isEmpty());
+        QVERIFY(tokens(shell, QStringLiteral("brainfuck")).isEmpty());
+
+        // Spans never run past the line.
+        for (const QString &language : MarkdownHighlighter::codeLanguages()) {
+            for (const auto &token : tokens(shell, language)) {
+                QVERIFY(token.start >= 0);
+                QVERIFY(token.length > 0);
+                QVERIFY(token.start + token.length <= shell.size());
+            }
+        }
+    }
+
+    // The regression the state packing could cause: markdown markers must stay
+    // literal inside a fence that names a language, not just a bare one.
+    void keepsMarkersLiteralInsideALanguageFence() {
+        QTextDocument document;
+        document.setPlainText(QStringLiteral("```python\n"
+                                             "name = *not italic*\n"
+                                             "```\n"));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.rehighlight();
+
+        const QTextBlock code = document.findBlockByNumber(1);
+        QVERIFY(MarkdownHighlighter::isInsideFence(code.userState()));
+
+        // One run for the whole line: the code panel, with nothing hidden and
+        // nothing italic inside it.
+        const QList<QTextLayout::FormatRange> runs = code.layout()->formats();
+        QVERIFY(!runs.isEmpty());
+        for (const QTextLayout::FormatRange &run : runs)
+            QVERIFY(!run.format.fontItalic());
     }
 
     void remembersLastSaveDirectory() {
