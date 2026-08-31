@@ -118,6 +118,25 @@ public:
     // then whatever else is installed.
     Q_INVOKABLE static QStringList availableFontFamilies();
 
+    // A line holding nothing but a file path embeds that file when the
+    // document is rendered: iA Writer's content blocks. Returns the markdown
+    // with every such line replaced by the file's content, and the source
+    // untouched -- the document on disk stays the path it was written as.
+    //
+    // documentDirectory is the folder the document itself lives in. Paths
+    // resolve inside it and nowhere else, so a document cannot read its way up
+    // and out of the folder it was opened from.
+    static QString expandContentBlocks(const QString &markdown,
+                                       const QString &documentDirectory);
+
+    // Whether a line is a content block, and what it names. Exposed because
+    // the shape of the line is the part worth testing directly.
+    struct ContentBlock {
+        QString path;
+        QString caption;
+    };
+    static bool contentBlockOnLine(const QString &line, ContentBlock *block);
+
     // The three iA writing faces the app carries, most proportional first --
     // Quattro is what iA Writer itself writes in, so it leads.
     static QStringList bundledFontFamilies();
@@ -218,6 +237,9 @@ private:
     void saveTo(const QUrl &url);
     QUrl suggestedSaveUrl() const;
     QString currentDocumentText() const;
+    // The document as it is rendered: content blocks resolved against the
+    // folder the document was opened from.
+    QString renderableDocumentText() const;
     void setWordCount(int words);
     void refreshWordCount();
     void scheduleWordCount();

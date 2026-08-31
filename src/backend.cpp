@@ -254,6 +254,194 @@ void Backend::setEditorFontSize(int editorFontSize) {
     emit editorFontSizeChanged();
 }
 
+namespace {
+// Anything larger is not something to inline into a document being read.
+constexpr qint64 maximumEmbeddedBytes = 512 * 1024;
+
+const QStringList &imageExtensions() {
+    static const QStringList extensions{
+        QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+        QStringLiteral("gif"), QStringLiteral("webp"), QStringLiteral("bmp"),
+        QStringLiteral("svg")};
+    return extensions;
+}
+
+const QStringList &proseExtensions() {
+    static const QStringList extensions{QStringLiteral("txt"), QStringLiteral("md"),
+                                        QStringLiteral("markdown"), QStringLiteral("text")};
+    return extensions;
+}
+
+const QStringList &tableExtensions() {
+    static const QStringList extensions{QStringLiteral("csv"), QStringLiteral("tsv")};
+    return extensions;
+}
+
+// One row of delimited text, honouring quotes so a field may hold the
+// delimiter. Deliberately small: a spreadsheet is not a document.
+QStringList splitDelimited(const QString &line, QChar delimiter) {
+    QStringList fields;
+    QString field;
+    bool quoted = false;
+    for (int i = 0; i < line.size(); ++i) {
+        const QChar character = line.at(i);
+        if (quoted) {
+            if (character == QLatin1Char('"')) {
+                if (i + 1 < line.size() && line.at(i + 1) == QLatin1Char('"')) {
+                    field.append(QLatin1Char('"'));
+                    ++i;
+                } else {
+                    quoted = false;
+                }
+            } else {
+                field.append(character);
+            }
+        } else if (character == QLatin1Char('"')) {
+            quoted = true;
+        } else if (character == delimiter) {
+            fields << field;
+            field.clear();
+        } else {
+            field.append(character);
+        }
+    }
+    fields << field;
+    return fields;
+}
+
+QString tableFrom(const QString &contents, QChar delimiter) {
+    const QStringList lines = contents.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    if (lines.isEmpty())
+        return {};
+
+    QStringList rendered;
+    for (int row = 0; row < lines.size(); ++row) {
+        QStringList fields = splitDelimited(lines.at(row).trimmed(), delimiter);
+        for (QString &field : fields)
+            field = field.trimmed().replace(QLatin1Char('|'), QStringLiteral("\\|"));
+        rendered << QStringLiteral("| ") + fields.join(QStringLiteral(" | "))
+                        + QStringLiteral(" |");
+        if (row == 0) {
+            QStringList rule;
+            for (int i = 0; i < fields.size(); ++i)
+                rule << QStringLiteral("---");
+            rendered << QStringLiteral("| ") + rule.join(QStringLiteral(" | "))
+                            + QStringLiteral(" |");
+        }
+    }
+    return rendered.join(QLatin1Char('\n'));
+}
+}
+
+bool Backend::contentBlockOnLine(const QString &line, ContentBlock *block) {
+    // A path, alone, optionally followed by a caption in quotes or brackets.
+    static const QRegularExpression blockRe(QStringLiteral(
+        "^\\s*([^\"'()\\s][^\"'()]*\\.[A-Za-z0-9]{1,10})"
+        "(?:\\s+(?:\"([^\"]*)\"|'([^']*)'|\\(([^)]*)\\)))?\\s*$"));
+
+    const QRegularExpressionMatch match = blockRe.match(line);
+    if (!match.hasMatch())
+        return false;
+
+    const QString path = match.captured(1).trimmed();
+    // A URL is not a file, and an absolute path is not inside the document's
+    // folder, which is the only place a block is allowed to reach.
+    if (path.contains(QStringLiteral("://")) || path.startsWith(QLatin1Char('/'))
+            || path.startsWith(QLatin1Char('~'))) {
+        return false;
+    }
+
+    if (block) {
+        block->path = path;
+        block->caption = match.captured(2) + match.captured(3) + match.captured(4);
+    }
+    return true;
+}
+
+QString Backend::expandContentBlocks(const QString &markdown,
+                                     const QString &documentDirectory) {
+    if (documentDirectory.isEmpty() || !markdown.contains(QLatin1Char('.')))
+        return markdown;
+
+    const QDir directory(documentDirectory);
+    const QString root = QDir(directory.absolutePath()).canonicalPath();
+    if (root.isEmpty())
+        return markdown;
+
+    QStringList lines = markdown.split(QLatin1Char('\n'));
+    bool insideFence = false;
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString trimmed = lines.at(i).trimmed();
+        if (trimmed.startsWith(QStringLiteral("```"))
+                || trimmed.startsWith(QStringLiteral("~~~"))) {
+            insideFence = !insideFence;
+            continue;
+        }
+        if (insideFence)
+            continue;
+
+        // The line must stand alone, or a sentence that happens to end in a
+        // filename would be swallowed.
+        const bool aloneAbove = i == 0 || lines.at(i - 1).trimmed().isEmpty();
+        const bool aloneBelow = i + 1 >= lines.size()
+            || lines.at(i + 1).trimmed().isEmpty();
+        if (!aloneAbove || !aloneBelow)
+            continue;
+
+        ContentBlock block;
+        if (!contentBlockOnLine(lines.at(i), &block))
+            continue;
+
+        const QString candidate =
+            QFileInfo(directory.filePath(block.path)).canonicalFilePath();
+        // Outside the document's folder, or not there at all: leave the line
+        // exactly as the writer typed it.
+        if (candidate.isEmpty()
+                || !(candidate == root || candidate.startsWith(root + QLatin1Char('/')))) {
+            continue;
+        }
+
+        const QFileInfo info(candidate);
+        if (!info.isFile() || info.size() > maximumEmbeddedBytes)
+            continue;
+
+        const QString suffix = info.suffix().toLower();
+        if (imageExtensions().contains(suffix)) {
+            lines[i] = QStringLiteral("![%1](%2)")
+                           .arg(block.caption, QUrl::fromLocalFile(candidate).toString());
+            continue;
+        }
+
+        QFile file(candidate);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        const QString contents = QString::fromUtf8(file.readAll());
+
+        QString replacement;
+        if (proseExtensions().contains(suffix)) {
+            replacement = contents;
+        } else if (tableExtensions().contains(suffix)) {
+            replacement = tableFrom(contents, suffix == QStringLiteral("tsv")
+                                                  ? QLatin1Char('\t')
+                                                  : QLatin1Char(','));
+        } else {
+            // Everything else is code, fenced under its own extension so the
+            // highlighter can read it.
+            replacement = QStringLiteral("```%1\n%2\n```").arg(suffix, contents.trimmed());
+        }
+
+        if (replacement.isEmpty())
+            continue;
+
+        if (!block.caption.isEmpty() && !proseExtensions().contains(suffix))
+            replacement += QStringLiteral("\n\n*%1*").arg(block.caption);
+
+        lines[i] = replacement;
+    }
+
+    return lines.join(QLatin1Char('\n'));
+}
+
 QStringList Backend::bundledFontFamilies() {
     return {QStringLiteral("iA Writer Quattro S"),
             QStringLiteral("iA Writer Duo S"),
@@ -591,7 +779,7 @@ void Backend::renderPreview(QObject *textDocument) {
 
     QTextDocument *preview = quickDocument->textDocument();
     preview->setDefaultFont(m_document ? m_document->defaultFont() : preview->defaultFont());
-    preview->setMarkdown(currentDocumentText());
+    preview->setMarkdown(renderableDocumentText());
 
     // Qt's Markdown reader packs every block flush against the next, so the
     // blank lines that separate paragraphs in the source disappear from the
@@ -884,7 +1072,7 @@ void Backend::printDocument() {
         // written rather than as a different document.
         printed.setFamily(m_editorFontFamily);
         rendered.setDefaultFont(printed);
-        rendered.setMarkdown(currentDocumentText());
+        rendered.setMarkdown(renderableDocumentText());
         rendered.print(&printer);
     }
 }
@@ -1415,6 +1603,15 @@ QUrl Backend::suggestedSaveUrl() const {
         : QDir(savedDirectory);
     return QUrl::fromLocalFile(
         directory.filePath(suggestedFileName(currentDocumentText())));
+}
+
+QString Backend::renderableDocumentText() const {
+    const QString text = currentDocumentText();
+    if (!m_fileUrl.isLocalFile())
+        return text;  // an untitled draft has no folder to resolve against
+
+    return expandContentBlocks(
+        text, QFileInfo(m_fileUrl.toLocalFile()).absolutePath());
 }
 
 QString Backend::currentDocumentText() const {
