@@ -41,6 +41,14 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property bool previewMode: false
+
+    // Typora parity: Ctrl+/ swaps the source buffer for a rendered view.
+    function togglePreview() {
+        previewMode = !previewMode;
+        if (!previewMode)
+            editor.forceActiveFocus();
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -201,6 +209,13 @@ ApplicationWindow {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
+    }
+
+    Shortcut {
+        id: previewShortcut
+        sequence: "Ctrl+/"
+        context: Qt.ApplicationShortcut
+        onActivated: win.togglePreview()
     }
 
     Shortcut {
@@ -408,6 +423,7 @@ ApplicationWindow {
                 + boldShortcut.nativeText + "  Bold\n"
                 + italicShortcut.nativeText + "  Italic\n"
                 + linkShortcut.nativeText + "  Link\n"
+                + previewShortcut.nativeText + "  Preview\n"
                 + zoomInShortcut.nativeText + "  Increase text size\n"
                 + zoomOutShortcut.nativeText + "  Decrease text size\n"
                 + zoomResetShortcut.nativeText + "  Reset text size\n"
@@ -432,7 +448,8 @@ ApplicationWindow {
             anchors.rightMargin: 24
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(height, (win.previewMode ? preview.y + preview.implicitHeight
+                                                             : editor.y + editor.implicitHeight) + 220)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -612,6 +629,7 @@ ApplicationWindow {
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
+                visible: !win.previewMode
                 x: Math.round((editorFlick.width - width) / 2)
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
@@ -942,6 +960,45 @@ ApplicationWindow {
                     forceActiveFocus();
                 }
             }
+
+            // Read-only rendered view. Qt renders the Markdown itself, so it
+            // shows real heading sizes and list structure the highlighter can
+            // only tint in place. It never calls attachDocument, so the
+            // highlighter stays bound to the source editor alone.
+            TextEdit {
+                id: preview
+                objectName: "previewView"
+                visible: win.previewMode
+                x: Math.round((editorFlick.width - width) / 2)
+                y: editor.y
+                width: win.editorWidth
+                height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+                textFormat: TextEdit.RichText
+                wrapMode: TextEdit.Wrap
+                readOnly: true
+                selectByMouse: true
+                persistentSelection: true
+                color: win.textColor
+                selectedTextColor: win.strongTextColor
+                selectionColor: win.selectionFill
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.editorFontPixelSize
+                font.weight: Font.Normal
+                renderType: Screen.devicePixelRatio % 1 === 0 ? TextEdit.NativeRendering : TextEdit.QtRendering
+                onLinkActivated: function(link) { Qt.openUrlExternally(link); }
+
+                function refresh() {
+                    if (win.previewMode)
+                        backend.renderPreview(textDocument);
+                }
+
+                onVisibleChanged: refresh()
+
+                Connections {
+                    target: editor
+                    function onTextChanged() { preview.refresh(); }
+                }
+            }
         }
 
         Rectangle {
@@ -989,6 +1046,14 @@ ApplicationWindow {
                     height: win.scaledSize(16)
                     verticalAlignment: Text.AlignVCenter
                 }
+            }
+
+            FooterIconButton {
+                objectName: "previewButton"
+                iconName: "preview"
+                iconColor: win.previewMode ? backend.themeAccent : win.mutedColor
+                tooltip: win.previewMode ? "Back to source (Ctrl+/)" : "Preview (Ctrl+/)"
+                onClicked: win.togglePreview()
             }
 
             Label {
