@@ -784,7 +784,10 @@ ApplicationWindow {
             // Pixel-precise touchpad deltas follow the fingers directly at a
             // larger scale. Recent deltas provide the velocity for a short,
             // frame-rate-independent coast when the gesture ends.
-            readonly property real touchpadScale: 2.0
+            // macOS accelerates trackpad deltas itself before Qt sees them, so
+            // doubling here would scroll twice as fast as every other app on
+            // the machine. Elsewhere the deltas arrive raw and need the scale.
+            readonly property real touchpadScale: Qt.platform.os === "osx" ? 1.0 : 2.0
             readonly property int touchpadEventGapMs: 80
             readonly property real touchpadVelocityBlend: 0.35
             readonly property real touchpadMomentumDecay: 0.90

@@ -2264,10 +2264,16 @@ private slots:
         QTest::qWait(20);
         sendTouchpadWheel(window, position, -10, Qt::ScrollUpdate);
 
+        // The scale is platform-dependent -- macOS accelerates trackpad deltas
+        // before Qt sees them -- so the expectation comes from the viewport
+        // rather than from the number one platform happens to produce.
+        const qreal scale = flick->property("touchpadScale").toReal();
+        QVERIFY(scale > 0);
+        const qreal expected = 200.0 + (8 + 10 + 10) * scale;
         const qreal gestureEndY = flick->property("contentY").toReal();
-        QVERIFY2(qAbs(gestureEndY - 256.0) <= 2.0,
-                 qPrintable(QStringLiteral("Expected scaled contentY near 256, got %1")
-                                .arg(gestureEndY)));
+        QVERIFY2(qAbs(gestureEndY - expected) <= 2.0,
+                 qPrintable(QStringLiteral("Expected contentY near %1 at scale %2, got %3")
+                                .arg(expected).arg(scale).arg(gestureEndY)));
 
         sendTouchpadWheel(window, position, 0, Qt::ScrollEnd);
         QTRY_VERIFY_WITH_TIMEOUT(flick->property("contentY").toReal()
