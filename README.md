@@ -25,7 +25,7 @@ To bundle the Qt frameworks and create a local DMG:
 ./bin/package-macos-arm64
 ```
 
-The package is written to `build/omawrite.dmg`. It is ad-hoc signed for local
+The package is written to `build-macos/omawrite.dmg`. It is ad-hoc signed for local
 use; public distribution still requires an Apple Developer ID signature and
 notarization.
 
