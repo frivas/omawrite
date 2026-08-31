@@ -424,6 +424,19 @@ QFont Backend::printFont(const QFont &editorFont, qreal screenDpi) {
     return font;
 }
 
+QString Backend::printJobName(const QString &documentFileName) {
+    const QString trimmed = documentFileName.trimmed();
+    if (trimmed.isEmpty())
+        return QStringLiteral("Untitled");
+
+    const QFileInfo info(trimmed);
+    const QString suffix = info.suffix().toLower();
+    if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown"))
+        return info.completeBaseName();
+
+    return trimmed;
+}
+
 void Backend::printDocument() {
     if (!m_document) {
         setStatus(QStringLiteral("There is no document to print."));
@@ -431,6 +444,8 @@ void Backend::printDocument() {
     }
 
     QPrinter printer(QPrinter::HighResolution);
+    // Drives the default filename macOS puts in Save as PDF.
+    printer.setDocName(printJobName(fileName()));
     QPrintDialog dialog(&printer);
     dialog.setWindowTitle(QStringLiteral("Print %1").arg(fileName()));
     dialog.winId();
