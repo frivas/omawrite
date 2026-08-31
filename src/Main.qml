@@ -29,7 +29,7 @@ ApplicationWindow {
     // Never wider than the Flickable's viewport, whatever the floor asks for:
     // a tiling compositor can resize the window below its minimum width.
     readonly property int editorWidth: Math.min(
-        Math.round(writerFontMetrics.averageCharacterWidth * 65),
+        Math.round(writerFontMetrics.averageCharacterWidth * backend.editorMeasureChars),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
         Math.max(0, width - 48))
     property bool closeConfirmed: false
@@ -79,7 +79,7 @@ ApplicationWindow {
 
     FontMetrics {
         id: writerFontMetrics
-        font.family: "iA Writer Mono S"
+        font.family: backend.editorFontFamily
         font.pixelSize: win.editorFontPixelSize
     }
 
@@ -625,7 +625,7 @@ ApplicationWindow {
                 color: win.textColor
                 selectedTextColor: win.strongTextColor
                 selectionColor: win.selectionFill
-                font.family: "iA Writer Mono S"
+                font.family: backend.editorFontFamily
                 font.pixelSize: win.editorFontPixelSize
                 font.weight: Font.Normal
                 // Native rendering hints glyphs to the pixel grid, which is
@@ -634,9 +634,28 @@ ApplicationWindow {
                 // the compositor delivers the fractional scale after the
                 // first frame). Fall back to Qt's scalable renderer there.
                 renderType: Screen.devicePixelRatio % 1 === 0 ? TextEdit.NativeRendering : TextEdit.QtRendering
+                // A line caret is iA Writer's: a thin accent-coloured bar, not
+                // a hairline in the text colour. A block caret covers the glyph
+                // it sits on, so it is drawn translucent to keep it readable.
                 cursorDelegate: Rectangle {
-                    width: 1
-                    color: win.strongTextColor
+                    id: caret
+                    width: backend.caretStyle === "block"
+                        ? Math.max(2, Math.round(writerFontMetrics.averageCharacterWidth))
+                        : 2
+                    color: backend.themeAccent
+                    opacity: backend.caretStyle === "block" ? 0.45 : 1
+
+                    // Qt does not blink a custom cursor delegate, so the blink
+                    // is ours, on the desktop's own flash time.
+                    SequentialAnimation on visible {
+                        running: backend.caretBlink && editor.activeFocus
+                        loops: Animation.Infinite
+                        PropertyAction { value: true }
+                        PauseAnimation { duration: Math.max(100, Qt.styleHints.cursorFlashTime / 2) }
+                        PropertyAction { value: false }
+                        PauseAnimation { duration: Math.max(100, Qt.styleHints.cursorFlashTime / 2) }
+                        onStopped: caret.visible = true
+                    }
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
 
@@ -962,7 +981,7 @@ ApplicationWindow {
                 Label {
                     text: backend.status
                     color: win.mutedColor
-                    font.family: "iA Writer Mono S"
+                    font.family: backend.editorFontFamily
                     font.pixelSize: win.scaledSize(11)
                     visible: text !== ""
                     elide: Text.ElideRight
@@ -980,7 +999,7 @@ ApplicationWindow {
                 text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
                 color: win.mutedColor
                 opacity: 0.75
-                font.family: "iA Writer Mono S"
+                font.family: backend.editorFontFamily
                 font.pixelSize: win.scaledSize(11)
             }
         }

@@ -47,6 +47,18 @@ notarization.
 - `Ctrl+?` shows the keyboard shortcut reference. On macOS, Qt maps `Ctrl`
   shortcuts to their native `Command` equivalents.
 
+The editor's appearance is configurable through QSettings, alongside autosave:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `editor/fontFamily` | `Aptos`, or the bundled face when the system lacks it | Editor and printed page |
+| `editor/caretStyle` | `line` | `line` is a 2px accent bar; `block` covers the glyph |
+| `editor/caretBlink` | `true` | Blinks on the desktop's own flash time |
+| `editor/measureChars` | `65` | Characters per line, which is what sets the editor's margins |
+| `print/marginMm` | `20` | Margins on the printed page and on Save as PDF |
+| `editor/autosave` | `true` | See below |
+| `editor/autosaveDelayMs` | `750` | See below |
+
 Autosave is on. A document that has been saved once follows you to disk about
 750ms after you stop typing, so `Ctrl+S` becomes something you press out of
 habit rather than need. Untitled drafts, and a document whose file changed
