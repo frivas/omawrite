@@ -9,6 +9,8 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
+#include <QVariantMap>
+#include <QStringList>
 #include <memory>
 
 class MarkdownHighlighter;
@@ -35,6 +37,7 @@ class Backend : public QObject {
                NOTIFY editorMeasureCharsChanged)
     Q_PROPERTY(qreal printMarginMm READ printMarginMm WRITE setPrintMarginMm
                NOTIFY printMarginMmChanged)
+    Q_PROPERTY(int wordTarget READ wordTarget WRITE setWordTarget NOTIFY wordTargetChanged)
     Q_PROPERTY(bool autosave READ autosave WRITE setAutosave NOTIFY autosaveChanged)
     Q_PROPERTY(int autosaveDelayMs READ autosaveDelayMs WRITE setAutosaveDelayMs
                NOTIFY autosaveDelayMsChanged)
@@ -53,6 +56,21 @@ public:
     // Save as PDF, so it has to be the document's name without the Markdown
     // extension rather than the app's idea of an untitled job.
     static QString printJobName(const QString &documentFileName);
+
+    // Text operations the writing process keeps asking for by hand. Each takes
+    // the document and a cursor offset and returns {"text", "cursor"}, so they
+    // are pure and testable; the editor applies the result.
+    Q_INVOKABLE static QVariantMap moveParagraph(const QString &text, int cursor,
+                                                 int delta);
+    Q_INVOKABLE static QVariantMap explodeSentences(const QString &text, int cursor);
+    Q_INVOKABLE static QVariantMap collapseSentences(const QString &text, int cursor);
+
+    // One entry per ATX heading: {"level", "title", "position"}.
+    Q_INVOKABLE static QVariantList outlineFor(const QString &text);
+
+    // Splits a paragraph into sentences. Exposed because the boundaries are a
+    // heuristic worth testing on its own.
+    static QStringList splitSentences(const QString &paragraph);
 
     // Starts a second Omawrite, optionally on a file. Exposed so main.cpp can
     // reuse it for Finder's open-document events.
@@ -96,6 +114,12 @@ public:
     // machine cannot leave another with a fallback nobody chose.
     static QString resolveFontFamily(const QString &requested,
                                      const QStringList &availableFamilies);
+
+    // 0 means no target. The first draft is deliberately written long, so the
+    // draft goal is the target plus a quarter.
+    int wordTarget() const { return m_wordTarget; }
+    void setWordTarget(int wordTarget);
+    Q_INVOKABLE static int draftTargetFor(int wordTarget);
 
     bool autosave() const { return m_autosave; }
     void setAutosave(bool autosave);
@@ -156,6 +180,7 @@ signals:
     void caretBlinkChanged();
     void editorMeasureCharsChanged();
     void printMarginMmChanged();
+    void wordTargetChanged();
     void autosaveChanged();
     void autosaveDelayMsChanged();
     void themeColorsChanged();
@@ -203,6 +228,7 @@ private:
     bool m_caretBlink = true;
     int m_editorMeasureChars = 65;
     qreal m_printMarginMm = 20.0;
+    int m_wordTarget = 0;
     bool m_autosave = true;
     int m_autosaveDelayMs = 750;
     // An outside edit the writer has not answered yet. Autosave must not pick

@@ -44,6 +44,10 @@ notarization.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl++` and `Ctrl+-` adjust the editor text size. `Ctrl+=` also increases it,
   and `Ctrl+0` resets it to the original size.
+- `Alt+Up` and `Alt+Down` move the paragraph at the caret past its neighbour.
+- `Ctrl+L` puts each sentence of the paragraph on its own line, and puts them
+  back together again.
+- `Ctrl+Shift+O` lists the document's headings and jumps to one.
 - `Ctrl+?` shows the keyboard shortcut reference. On macOS, Qt maps `Ctrl`
   shortcuts to their native `Command` equivalents.
 
@@ -56,6 +60,7 @@ The editor's appearance is configurable through QSettings, alongside autosave:
 | `editor/caretBlink` | `true` | Blinks on the desktop's own flash time |
 | `editor/measureChars` | `65` | Characters per line, which is what sets the editor's margins |
 | `print/marginMm` | `20` | Margins on the printed page and on Save as PDF |
+| `editor/wordTarget` | `0` (off) | Footer counts towards it, and names a first-draft goal a quarter longer |
 | `editor/autosave` | `true` | See below |
 | `editor/autosaveDelayMs` | `750` | See below |
 

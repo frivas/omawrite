@@ -55,6 +55,7 @@ constexpr int minimumEditorMeasureChars = 20;
 constexpr int maximumEditorMeasureChars = 200;
 constexpr qreal defaultPrintMarginMm = 20.0;
 constexpr qreal maximumPrintMarginMm = 60.0;
+const QString wordTargetSetting = QStringLiteral("editor/wordTarget");
 const QString autosaveSetting = QStringLiteral("editor/autosave");
 const QString autosaveDelaySetting = QStringLiteral("editor/autosaveDelayMs");
 constexpr int defaultAutosaveDelayMs = 750;
@@ -158,6 +159,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                                                          defaultPrintMarginMm).toDouble(),
                              maximumPrintMarginMm);
 
+    m_wordTarget = qMax(0, QSettings().value(wordTargetSetting, 0).toInt());
     m_autosave = QSettings().value(autosaveSetting, true).toBool();
     m_autosaveDelayMs = qBound(minimumAutosaveDelayMs,
                                QSettings().value(autosaveDelaySetting,
@@ -314,6 +316,25 @@ void Backend::setPrintMarginMm(qreal marginMm) {
     m_printMarginMm = bounded;
     QSettings().setValue(printMarginMmSetting, m_printMarginMm);
     emit printMarginMmChanged();
+}
+
+int Backend::draftTargetFor(int wordTarget) {
+    if (wordTarget <= 0)
+        return 0;
+
+    // A first draft wants a quarter more than the finished piece, so there is
+    // something to throw away rather than something to pad.
+    return qRound(wordTarget * 1.25);
+}
+
+void Backend::setWordTarget(int wordTarget) {
+    const int bounded = qMax(0, wordTarget);
+    if (m_wordTarget == bounded)
+        return;
+
+    m_wordTarget = bounded;
+    QSettings().setValue(wordTargetSetting, m_wordTarget);
+    emit wordTargetChanged();
 }
 
 void Backend::setAutosave(bool autosave) {
@@ -572,6 +593,230 @@ void Backend::renderPreview(QObject *textDocument) {
         cursor.setBlockFormat(format);
     }
     cursor.endEditBlock();
+}
+
+namespace {
+// A paragraph is a run of non-blank lines. Returns the [start, end) offsets of
+// the paragraph containing `cursor`, clamped to the text.
+struct ParagraphRange { int start; int end; };
+
+ParagraphRange paragraphAround(const QStringList &lines, int lineIndex) {
+    int start = lineIndex;
+    while (start > 0 && !lines.at(start - 1).trimmed().isEmpty())
+        --start;
+    int end = lineIndex;
+    while (end + 1 < lines.size() && !lines.at(end + 1).trimmed().isEmpty())
+        ++end;
+    return {start, end};
+}
+
+int lineIndexForOffset(const QStringList &lines, int cursor) {
+    int consumed = 0;
+    for (int i = 0; i < lines.size(); ++i) {
+        consumed += lines.at(i).size() + 1;  // the newline
+        if (cursor < consumed)
+            return i;
+    }
+    return qMax(0, lines.size() - 1);
+}
+
+int offsetForLineIndex(const QStringList &lines, int lineIndex) {
+    int offset = 0;
+    for (int i = 0; i < lineIndex && i < lines.size(); ++i)
+        offset += lines.at(i).size() + 1;
+    return offset;
+}
+
+QVariantMap result(const QString &text, int cursor) {
+    return QVariantMap{{QStringLiteral("text"), text},
+                       {QStringLiteral("cursor"), qBound(0, cursor, text.size())}};
+}
+
+// Abbreviations that end in a full stop without ending a sentence. Deliberately
+// short: a longer list is a dictionary, and the cost of a wrong split here is
+// one keystroke to undo, not lost work.
+bool endsWithAbbreviation(const QString &sentence) {
+    static const QStringList abbreviations{
+        QStringLiteral("mr."),  QStringLiteral("mrs."), QStringLiteral("ms."),
+        QStringLiteral("dr."),  QStringLiteral("prof."), QStringLiteral("st."),
+        QStringLiteral("e.g."), QStringLiteral("i.e."), QStringLiteral("etc."),
+        QStringLiteral("vs."),  QStringLiteral("cf."),  QStringLiteral("al.")};
+
+    const QString tail = sentence.trimmed().toLower();
+    for (const QString &abbreviation : abbreviations) {
+        if (tail.endsWith(abbreviation))
+            return true;
+    }
+
+    // A single initial, as in "J. B. Peterson".
+    if (tail.size() >= 2 && tail.endsWith(QLatin1Char('.'))
+            && tail.at(tail.size() - 2).isLetter()
+            && (tail.size() == 2 || !tail.at(tail.size() - 3).isLetter())) {
+        return true;
+    }
+
+    return false;
+}
+}
+
+QStringList Backend::splitSentences(const QString &paragraph) {
+    QStringList sentences;
+    const QString text = paragraph.simplified();
+    if (text.isEmpty())
+        return sentences;
+
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar character = text.at(i);
+        if (character != QLatin1Char('.') && character != QLatin1Char('!')
+                && character != QLatin1Char('?')) {
+            continue;
+        }
+
+        // Run on through ?!. and any closing quote or bracket.
+        int end = i;
+        while (end + 1 < text.size()
+               && QStringLiteral(".!?\"')]").contains(text.at(end + 1))) {
+            ++end;
+        }
+
+        if (end + 1 >= text.size()) {
+            sentences << text.mid(start).trimmed();
+            start = text.size();
+            break;
+        }
+
+        if (text.at(end + 1) != QLatin1Char(' '))
+            continue;
+
+        const QString candidate = text.mid(start, end - start + 1);
+        if (endsWithAbbreviation(candidate))
+            continue;
+
+        // A decimal such as "3.5" is not a boundary.
+        if (character == QLatin1Char('.') && i > 0 && text.at(i - 1).isDigit()
+                && end + 2 < text.size() && text.at(end + 2).isDigit()) {
+            continue;
+        }
+
+        sentences << candidate.trimmed();
+        start = end + 2;
+        i = end + 1;
+    }
+
+    if (start < text.size()) {
+        const QString rest = text.mid(start).trimmed();
+        if (!rest.isEmpty())
+            sentences << rest;
+    }
+
+    return sentences;
+}
+
+QVariantMap Backend::moveParagraph(const QString &text, int cursor, int delta) {
+    if (delta == 0)
+        return result(text, cursor);
+
+    QStringList lines = text.split(QLatin1Char('\n'));
+    const int lineIndex = lineIndexForOffset(lines, cursor);
+    const ParagraphRange here = paragraphAround(lines, lineIndex);
+    if (lines.at(here.start).trimmed().isEmpty())
+        return result(text, cursor);  // the cursor is between paragraphs
+
+    // Find the neighbouring paragraph in the direction asked for.
+    int probe = delta < 0 ? here.start - 1 : here.end + 1;
+    while (probe >= 0 && probe < lines.size() && lines.at(probe).trimmed().isEmpty())
+        probe += delta < 0 ? -1 : 1;
+    if (probe < 0 || probe >= lines.size())
+        return result(text, cursor);  // nothing to trade places with
+
+    const ParagraphRange there = paragraphAround(lines, probe);
+    const int cursorWithin = cursor - offsetForLineIndex(lines, here.start);
+
+    const QStringList moving = lines.mid(here.start, here.end - here.start + 1);
+    const QStringList other = lines.mid(there.start, there.end - there.start + 1);
+
+    QStringList rebuilt;
+    if (delta < 0) {
+        rebuilt = lines.mid(0, there.start) + moving + QStringList{QString()} + other
+                + lines.mid(here.end + 1);
+    } else {
+        rebuilt = lines.mid(0, here.start) + other + QStringList{QString()} + moving
+                + lines.mid(there.end + 1);
+    }
+
+    const QString rebuiltText = rebuilt.join(QLatin1Char('\n'));
+    const int newStartLine = delta < 0 ? there.start
+                                       : there.start - (here.end - here.start + 1);
+    const int newCursor = offsetForLineIndex(rebuilt, qMax(0, newStartLine)) + cursorWithin;
+    return result(rebuiltText, newCursor);
+}
+
+QVariantMap Backend::explodeSentences(const QString &text, int cursor) {
+    QStringList lines = text.split(QLatin1Char('\n'));
+    const int lineIndex = lineIndexForOffset(lines, cursor);
+    const ParagraphRange range = paragraphAround(lines, lineIndex);
+    if (lines.at(range.start).trimmed().isEmpty())
+        return result(text, cursor);
+
+    const QString paragraph =
+        lines.mid(range.start, range.end - range.start + 1).join(QLatin1Char(' '));
+    const QStringList sentences = splitSentences(paragraph);
+    if (sentences.size() < 2)
+        return result(text, cursor);
+
+    const QStringList rebuilt =
+        lines.mid(0, range.start) + sentences + lines.mid(range.end + 1);
+    const QString rebuiltText = rebuilt.join(QLatin1Char('\n'));
+    return result(rebuiltText, offsetForLineIndex(rebuilt, range.start));
+}
+
+QVariantMap Backend::collapseSentences(const QString &text, int cursor) {
+    QStringList lines = text.split(QLatin1Char('\n'));
+    const int lineIndex = lineIndexForOffset(lines, cursor);
+    const ParagraphRange range = paragraphAround(lines, lineIndex);
+    if (lines.at(range.start).trimmed().isEmpty())
+        return result(text, cursor);
+
+    QStringList parts;
+    for (int i = range.start; i <= range.end; ++i) {
+        const QString trimmed = lines.at(i).trimmed();
+        if (!trimmed.isEmpty())
+            parts << trimmed;
+    }
+
+    const QStringList rebuilt = lines.mid(0, range.start)
+        + QStringList{parts.join(QLatin1Char(' '))} + lines.mid(range.end + 1);
+    const QString rebuiltText = rebuilt.join(QLatin1Char('\n'));
+    return result(rebuiltText, offsetForLineIndex(rebuilt, range.start));
+}
+
+QVariantList Backend::outlineFor(const QString &text) {
+    QVariantList outline;
+    static const QRegularExpression headingRe(
+        QStringLiteral("^(#{1,6})\\s+(.*\\S)\\s*$"));
+
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    int offset = 0;
+    bool inFence = false;
+    for (const QString &line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QStringLiteral("```"))
+                || trimmed.startsWith(QStringLiteral("~~~"))) {
+            inFence = !inFence;
+        } else if (!inFence) {
+            const QRegularExpressionMatch match = headingRe.match(line);
+            if (match.hasMatch()) {
+                outline.append(QVariantMap{
+                    {QStringLiteral("level"), match.captured(1).size()},
+                    {QStringLiteral("title"), match.captured(2)},
+                    {QStringLiteral("position"), offset}});
+            }
+        }
+        offset += line.size() + 1;
+    }
+
+    return outline;
 }
 
 void Backend::printDocument() {
