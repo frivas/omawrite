@@ -2426,7 +2426,24 @@ private slots:
         // Both are baked in at build time, so an unknown here means the build
         // lost track of what it was built from.
         QVERIFY(!Backend::appVersion().isEmpty());
-        QCOMPARE(Backend::appVersion(), QStringLiteral("0.5.0-macos.2"));
+
+        // Read from version.pri rather than written here as well: a release
+        // bumps one number, and a test that hardcodes it turns every release
+        // into a failing build.
+        const QString versionPri = QFINDTESTDATA("../version.pri");
+        QVERIFY(!versionPri.isEmpty());
+        QFile pri(versionPri);
+        QVERIFY(pri.open(QIODevice::ReadOnly | QIODevice::Text));
+        QString declared;
+        while (!pri.atEnd()) {
+            const QString line = QString::fromUtf8(pri.readLine()).trimmed();
+            if (line.startsWith(QStringLiteral("VERSION"))) {
+                declared = line.section(QLatin1Char('='), 1).trimmed();
+                break;
+            }
+        }
+        QVERIFY2(!declared.isEmpty(), "version.pri declares no VERSION");
+        QCOMPARE(Backend::appVersion(), declared);
         QVERIFY(!Backend::appCommit().isEmpty());
         QVERIFY2(Backend::appCommit() != QStringLiteral("unknown"),
                  "the build did not record a commit");
