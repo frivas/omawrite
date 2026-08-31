@@ -14,6 +14,7 @@
 #include <QPrinter>
 #include <QQuickTextDocument>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QScreen>
 #include <QRegularExpression>
 #include <QSettings>
@@ -584,9 +585,14 @@ void Backend::renderPreview(QObject *textDocument) {
     // blank lines that separate paragraphs in the source disappear from the
     // render. Put that breathing room back as real block spacing, sized from
     // the editor font so it tracks the desktop text scale.
-    const qreal gap = preview->defaultFont().pixelSize() > 0
-                          ? preview->defaultFont().pixelSize() * 0.75
-                          : 15.0;
+    //
+    // The gap is one line of the editor's own leading, because that is exactly
+    // what a blank line between two paragraphs is in the source. Anything else
+    // makes the preview a differently spaced document.
+    // Measured rather than taken from the font's pixel size, which a
+    // point-sized font does not have.
+    const qreal gap = QFontMetricsF(preview->defaultFont()).height()
+        * typoraLineHeightPercent / 100.0;
 
     QTextCursor cursor(preview);
     cursor.beginEditBlock();
@@ -601,6 +607,11 @@ void Backend::renderPreview(QObject *textDocument) {
         // Quotes need the leading gap too or they read as another list row.
         format.setTopMargin(heading ? gap * 1.5 : (quote ? gap : 0));
         format.setBottomMargin(listItem ? gap * 0.2 : gap);
+
+        // The same leading the editor writes with. Without it the preview is
+        // set tighter than the source and reads as a different document.
+        format.setLineHeight(typoraLineHeightPercent,
+                             QTextBlockFormat::ProportionalHeight);
         cursor.setPosition(block.position());
         cursor.setBlockFormat(format);
     }

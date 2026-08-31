@@ -2025,6 +2025,49 @@ private slots:
                  QStringLiteral("iA Writer Quattro S"));
     }
 
+    // The preview is the same document seen another way, so it has to be set
+    // the same way: the editor's leading, and a paragraph gap that is the
+    // blank line the source actually contains.
+    void setsThePreviewWithTheSameLeadingAsTheEditor() {
+        QQmlEngine engine;
+        QScopedPointer<QObject> harness(makeRenderHarness(engine));
+        QVERIFY(harness);
+
+        Backend backend;
+        QQuickTextDocument *editorDocument = attachTextEdit(&backend);
+        QVERIFY(editorDocument);
+        editorDocument->textDocument()->setPlainText(
+            QStringLiteral("One paragraph.\n\nAnother paragraph.\n"));
+        backend.editorTextChanged();
+
+        // What the editor writes with.
+        const QTextBlockFormat editorFormat =
+            editorDocument->textDocument()->begin().blockFormat();
+        QCOMPARE(editorFormat.lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
+        const qreal editorLeading = editorFormat.lineHeight();
+        QVERIFY(editorLeading > 100);
+
+        QTextDocument *rendered = renderThrough(backend, harness.data(),
+            QStringLiteral("One paragraph.\n\nAnother paragraph.\n"));
+        QVERIFY(rendered);
+
+        int paragraphs = 0;
+        for (QTextBlock block = rendered->begin(); block.isValid(); block = block.next()) {
+            const QTextBlockFormat format = block.blockFormat();
+            QCOMPARE(format.lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
+            QCOMPARE(format.lineHeight(), editorLeading);
+            ++paragraphs;
+        }
+        QVERIFY(paragraphs >= 2);
+
+        // And the gap between paragraphs is one of those lines, which is what
+        // the blank line in the source comes to.
+        const qreal line = QFontMetricsF(rendered->defaultFont()).height();
+        QVERIFY(line > 0);
+        QCOMPARE(rendered->begin().blockFormat().bottomMargin(),
+                 line * editorLeading / 100.0);
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
