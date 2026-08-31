@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QFont>
+#include <QColor>
+#include <QQuickItem>
 #include <QFontMetricsF>
 #include <QPrinter>
 #include <QTextLayout>
@@ -1243,6 +1245,40 @@ private slots:
                 <= viewport->property("width").toInt());
         QVERIFY(editor->property("x").toInt() >= 0);
     }
+    void reservesAnOpaqueFooterBelowTheEditor() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        auto *footer = window->findChild<QQuickItem *>(QStringLiteral("footer"));
+        auto *editorViewport = window->findChild<QQuickItem *>(
+            QStringLiteral("editorViewport"));
+        auto *saveButton = window->findChild<QQuickItem *>(QStringLiteral("saveButton"));
+        QVERIFY(footer);
+        QVERIFY(editorViewport);
+        QVERIFY(saveButton);
+
+        QCOMPARE(footer->opacity(), qreal(1));
+        const QColor footerColor = footer->property("color").value<QColor>();
+        QCOMPARE(footerColor.alpha(), 255);
+        QCOMPARE(footerColor, QColor(backend.themeBackground()));
+        QCOMPARE(editorViewport->mapToScene(QPointF(0, editorViewport->height())).y(),
+                 footer->mapToScene(QPointF()).y());
+
+        backend.setTextScale(0.5);
+        QVERIFY(saveButton->mapToScene(QPointF()).y()
+                >= footer->mapToScene(QPointF()).y());
+        QCOMPARE(editorViewport->mapToScene(QPointF(0, editorViewport->height())).y(),
+                 footer->mapToScene(QPointF()).y());
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
