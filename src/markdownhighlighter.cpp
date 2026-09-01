@@ -86,9 +86,17 @@ void MarkdownHighlighter::rebuildFormats() {
     m_italicFormat.setFontItalic(true);
     m_italicFormat.setForeground(text);
 
+    // Inline code keeps a character background: a span inside a sentence has
+    // no block of its own to sit on.
+    m_inlineCodeFormat = QTextCharFormat();
+    m_inlineCodeFormat.setForeground(text);
+    m_inlineCodeFormat.setBackground(codeBackground);
+
+    // Fenced code gets none. The panel behind it is drawn in QML, and a
+    // character background on top of it is the stripe that ends at the last
+    // glyph on each line.
     m_codeFormat = QTextCharFormat();
     m_codeFormat.setForeground(text);
-    m_codeFormat.setBackground(codeBackground);
 
     // A fence recedes the way a heading's `#` does, over the panel it opens.
     m_fenceFormat = m_codeFormat;
@@ -156,6 +164,8 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
                                    : Prose);
 
     if (fence || insideFence) {
+        // No character background here: the panel is drawn behind the whole
+        // fence in QML. Painting one per line is what made it striped.
         setFormat(0, text.length(), fence ? m_fenceFormat : m_codeFormat);
         if (insideFence && languageIndex > 0 && languageIndex <= languages.size())
             highlightCode(text, languages.at(languageIndex - 1));
@@ -463,7 +473,7 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
     for (const Span &code : codeSpans(text))
-        setFormat(code.start, code.length, m_codeFormat);
+        setFormat(code.start, code.length, m_inlineCodeFormat);
 
     const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {

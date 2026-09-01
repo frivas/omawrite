@@ -1252,15 +1252,6 @@ bool Backend::editorTextChanged() {
         m_formattedBlockCount = blockCount;
     }
 
-    // Only the number of fences decides who sits on a panel, so the shading
-    // pass runs when that changes rather than on every keystroke.
-    const int fences = currentDocumentText().count(QStringLiteral("```"))
-        + currentDocumentText().count(QStringLiteral("~~~"));
-    if (fences != m_fenceLineCount) {
-        m_fenceLineCount = fences;
-        applyCodeBlockShading();
-    }
-
     scheduleWordCount();
 
     const QString &baseline = m_lastKnownFileText;
@@ -1769,57 +1760,40 @@ void Backend::applyDocumentTypography() {
 
     m_document->setUndoRedoEnabled(undoEnabled);
 
-    applyCodeBlockShading();
-
     m_formattedBlockCount = m_document->blockCount();
 }
 
-// Paint the panel behind every line of every fence. Only the fence structure
-// matters here, so the pass runs when the number of fence lines changes rather
-// than on every keystroke: typing inside a fence lands on a block that already
-// carries the panel, and a new line inherits it from the one above.
-void Backend::applyCodeBlockShading() {
+QVariantList Backend::fencedRanges() const {
+    QVariantList ranges;
     if (!m_document)
-        return;
+        return ranges;
 
-    const QColor panel(m_themeCodeBackground);
-    if (!panel.isValid())
-        return;
-
-    const bool undoEnabled = m_document->isUndoRedoEnabled();
-    m_document->setUndoRedoEnabled(false);
-    m_formattingTypography = true;
-
-    QTextCursor cursor(m_document);
-    cursor.beginEditBlock();
-
-    bool insideFence = false;
+    int openedAt = -1;
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
         const QString trimmed = block.text().trimmed();
-        const bool fence = trimmed.startsWith(QStringLiteral("```"))
-            || trimmed.startsWith(QStringLiteral("~~~"));
-        // The fences themselves are part of the panel they open and close.
-        const bool shaded = fence || insideFence;
-        if (fence)
-            insideFence = !insideFence;
-
-        QTextBlockFormat format = block.blockFormat();
-        const bool alreadyShaded = format.background().style() != Qt::NoBrush;
-        if (shaded == alreadyShaded)
+        if (!trimmed.startsWith(QStringLiteral("```"))
+                && !trimmed.startsWith(QStringLiteral("~~~"))) {
             continue;
+        }
 
-        if (shaded)
-            format.setBackground(panel);
-        else
-            format.clearBackground();
-
-        cursor.setPosition(block.position());
-        cursor.setBlockFormat(format);
+        if (openedAt < 0) {
+            openedAt = block.position();
+        } else {
+            ranges.append(QVariantMap{
+                {QStringLiteral("start"), openedAt},
+                {QStringLiteral("end"), block.position() + block.length() - 1}});
+            openedAt = -1;
+        }
     }
 
-    cursor.endEditBlock();
-    m_formattingTypography = false;
-    m_document->setUndoRedoEnabled(undoEnabled);
+    // A fence left open still wants its panel, to the end of the document.
+    if (openedAt >= 0) {
+        ranges.append(QVariantMap{
+            {QStringLiteral("start"), openedAt},
+            {QStringLiteral("end"), m_document->characterCount() - 1}});
+    }
+
+    return ranges;
 }
 
 void Backend::reapplyTypographyToChange() {

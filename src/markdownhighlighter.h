@@ -101,6 +101,7 @@ private:
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;
     QTextCharFormat m_codeFormat;
+    QTextCharFormat m_inlineCodeFormat;
     QTextCharFormat m_fenceFormat;
     QTextCharFormat m_codeCommentFormat;
     QTextCharFormat m_codeStringFormat;

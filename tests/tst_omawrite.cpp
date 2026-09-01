@@ -153,7 +153,9 @@ private slots:
             document.findBlockByNumber(2).layout()->formats();
         QCOMPARE(fenced.size(), 1);
         QCOMPARE(fenced.constFirst().length, document.findBlockByNumber(2).text().length());
-        QVERIFY(fenced.constFirst().format.background().style() != Qt::NoBrush);
+        // The panel behind a fence is drawn in QML, so the run carries no
+        // character background of its own -- that was the stripe.
+        QCOMPARE(fenced.constFirst().format.background().style(), Qt::NoBrush);
         for (const QTextLayout::FormatRange &range : fenced) {
             QVERIFY(!range.format.fontItalic());
             QVERIFY(range.format.foreground().color() != range.format.background().color());
@@ -2504,35 +2506,114 @@ private slots:
         QTRY_COMPARE(icon->property("status").toInt(), 1);  // Image.Ready
     }
 
-    // The panel behind code has to be a block, not a character background:
-    // a character background stops at the last glyph on each line and leaves
-    // the leading bare, which is stripes rather than a panel.
-    void putsFencedCodeOnAWholeBlockPanel() {
+    void findsTheFencesToDrawAPanelBehind() {
         Backend backend;
         QQuickTextDocument *doc = attachTextEdit(&backend);
         QVERIFY(doc);
 
-        doc->textDocument()->setPlainText(QStringLiteral(
-            "Prose above.\n\n```python\ndef hello():\n    return 1\n```\n\nProse below.\n"));
+        const QString text = QStringLiteral(
+            "Prose.\n\n```python\ndef hello():\n    return 1\n```\n\nMore.\n\n"
+            "```\nplain\n```\n");
+        doc->textDocument()->setPlainText(text);
         backend.editorTextChanged();
 
-        QTextDocument *document = doc->textDocument();
-        QStringList shaded;
-        QStringList bare;
-        for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
-            if (block.blockFormat().background().style() != Qt::NoBrush)
-                shaded << block.text();
-            else if (!block.text().trimmed().isEmpty())
-                bare << block.text();
+        const QVariantList ranges = backend.fencedRanges();
+        QCOMPARE(ranges.size(), 2);
+
+        // Each range spans its opening fence through its closing one.
+        const QVariantMap first = ranges.at(0).toMap();
+        QCOMPARE(text.mid(first.value(QStringLiteral("start")).toInt(), 9),
+                 QStringLiteral("```python"));
+        const int firstEnd = first.value(QStringLiteral("end")).toInt();
+        QCOMPARE(text.mid(firstEnd - 3, 3), QStringLiteral("```"));
+
+        const QVariantMap second = ranges.at(1).toMap();
+        QVERIFY(second.value(QStringLiteral("start")).toInt() > firstEnd);
+
+        // A fence left open still wants a panel, to the end of the document.
+        doc->textDocument()->setPlainText(QStringLiteral("```python\nunclosed\n"));
+        backend.editorTextChanged();
+        const QVariantList unclosed = backend.fencedRanges();
+        QCOMPARE(unclosed.size(), 1);
+        QCOMPARE(unclosed.at(0).toMap().value(QStringLiteral("end")).toInt(),
+                 doc->textDocument()->characterCount() - 1);
+
+        // No fences, no panels.
+        doc->textDocument()->setPlainText(QStringLiteral("just prose\n"));
+        backend.editorTextChanged();
+        QCOMPARE(backend.fencedRanges().size(), 0);
+    }
+
+    // Checked on the pixels of a shown window, because the editor is where
+    // this went wrong before: the document carried a block background, every
+    // format assertion passed, and Qt Quick's TextEdit never painted it. Only
+    // the character background showed, which is what made code look striped.
+    void drawsThePanelBehindFencedCodeInTheEditor() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text",
+            QStringLiteral("Prose.\n\n```python\ndef hello():\n    x = 1\n```\n\nAfter.\n"));
+        QTRY_COMPARE(editor->property("fencedRanges").toList().size(), 1);
+        QTest::qWait(300);
+
+        const QImage shot = window->grabWindow();
+        QVERIFY(!shot.isNull());
+        const QColor panel(backend.themeCodeBackground());
+        QVERIFY(panel.isValid());
+
+        auto isPanel = [&](const QColor &pixel) {
+            return qAbs(pixel.red() - panel.red()) <= 4
+                && qAbs(pixel.green() - panel.green()) <= 4
+                && qAbs(pixel.blue() - panel.blue()) <= 4;
+        };
+
+        // Count panel pixels per row, so the panel can be found without
+        // knowing where the window put it.
+        QList<int> panelRows;
+        for (int y = 0; y < shot.height(); ++y) {
+            int run = 0;
+            for (int x = 0; x < shot.width(); ++x) {
+                if (isPanel(shot.pixelColor(x, y)))
+                    ++run;
+            }
+            // A panel row is most of the width; a stray glyph pixel is not.
+            if (run > shot.width() / 2)
+                panelRows << y;
         }
 
-        // The fences and everything between them, and nothing else.
-        QCOMPARE(shaded, QStringList({QStringLiteral("```python"),
-                                      QStringLiteral("def hello():"),
-                                      QStringLiteral("    return 1"),
-                                      QStringLiteral("```")}));
-        QVERIFY(bare.contains(QStringLiteral("Prose above.")));
-        QVERIFY(bare.contains(QStringLiteral("Prose below.")));
+        // Four lines of fence, at whatever the line height works out to, is
+        // far more than the couple of rows a character background would give.
+        QVERIFY2(panelRows.size() > 40,
+                 qPrintable(QStringLiteral("only %1 rows carried a panel")
+                                .arg(panelRows.size())));
+
+        // Contiguous: one panel, not a stripe per line with gaps between.
+        QCOMPARE(panelRows.last() - panelRows.first() + 1, panelRows.size());
+
+        // And the prose above it is not on a panel.
+        QVERIFY(panelRows.first() > 0);
+        int proseRun = 0;
+        for (int x = 0; x < shot.width(); ++x) {
+            if (isPanel(shot.pixelColor(x, panelRows.first() - 4)))
+                ++proseRun;
+        }
+        QVERIFY(proseRun < shot.width() / 2);
     }
 
     // What is printed is what is rendered, so this covers Save as PDF too.

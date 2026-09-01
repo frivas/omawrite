@@ -54,10 +54,12 @@ cd "$BUILD_DIR"
 # Never carry frameworks or plugins over from a previous Qt toolchain.
 rm -rf "$APP"
 "$QMAKE" "$ROOT/omawrite.pro" CONFIG+=release QMAKE_APPLE_DEVICE_ARCHS=arm64
-# A release wants the clean build; day to day the objects are worth keeping.
-if [ "${OMAWRITE_NO_CACHE:-}" = "1" ]; then
-  make clean
-fi
+# Always clean. The commit About reports is a -D flag, and make rebuilds on
+# source changes without noticing that a flag moved: skipping this served a
+# binary built from yesterday's sources while the Makefile named today's
+# commit. Four seconds of compiling is not worth being unsure what is in the
+# bundle.
+make clean
 make -j"$JOBS"
 
 BINARY="$APP/Contents/MacOS/omawrite"

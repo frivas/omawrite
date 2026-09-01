@@ -259,7 +259,12 @@ private:
     // Fenced code sits on a panel. A character background only paints behind
     // the glyphs, so it ends ragged at each line and leaves gaps through the
     // leading; a block background fills the line.
-    void applyCodeBlockShading();
+    // Where the fences are, as character positions, so the editor can draw a
+    // panel behind them. Qt Quick's TextEdit paints character backgrounds but
+    // ignores block ones, so the panel cannot come from the document itself.
+public:
+    Q_INVOKABLE QVariantList fencedRanges() const;
+private:
     // The block formatting a rendered document needs: the editor's leading,
     // paragraph spacing the markdown reader drops, and the panel behind code.
     // Preview and print share it, or the page comes out set differently from
@@ -274,7 +279,6 @@ public:
     }
 
 private:
-    int m_fenceLineCount = -1;
     void reapplyTypographyToChange();
     void scheduleRecovery();
     void persistDocument();

@@ -1121,6 +1121,55 @@ ApplicationWindow {
                 // A line caret is iA Writer's: a thin accent-coloured bar, not
                 // a hairline in the text colour. A block caret covers the glyph
                 // it sits on, so it is drawn translucent to keep it readable.
+                // The panel behind fenced code. It is drawn here rather than
+                // set on the document because Qt Quick's TextEdit paints
+                // character backgrounds but ignores block ones -- a block
+                // background is simply never rendered, which is why the code
+                // came out striped: what showed was the character background
+                // ending at the last glyph of each line.
+                Repeater {
+                    id: codePanels
+                    objectName: "codePanels"
+                    model: editor.fencedRanges
+
+                    Rectangle {
+                        // On the Rectangle, not the Repeater: a Repeater is
+                        // not a visual parent, so its z reaches nothing. The
+                        // panel has to sit behind the TextEdit's own text.
+                        z: -1
+                        // positionToRectangle() reports where the text sits
+                        // now and says nothing when that moves, so these read
+                        // the tick as well: without it the panel keeps the
+                        // geometry the first layout happened to have.
+                        readonly property rect head: {
+                            editor.layoutTick;
+                            return editor.positionToRectangle(modelData.start);
+                        }
+                        readonly property rect tail: {
+                            editor.layoutTick;
+                            return editor.positionToRectangle(modelData.end);
+                        }
+                        x: -8
+                        width: editor.width + 16
+                        y: head.y
+                        height: Math.max(0, tail.y + tail.height - head.y)
+                        color: backend.themeCodeBackground
+                        radius: 2
+                    }
+                }
+
+                // Recomputed when the text changes rather than bound to it:
+                // the ranges come from the document, which QML cannot observe.
+                property var fencedRanges: []
+                // Bumped whenever the text is laid out again, so the panels
+                // can depend on something that actually changes.
+                property int layoutTick: 0
+                onContentHeightChanged: layoutTick++
+                onContentWidthChanged: layoutTick++
+                function refreshFencedRanges() {
+                    fencedRanges = backend.fencedRanges();
+                    layoutTick++;
+                }
                 cursorDelegate: Rectangle {
                     id: caret
                     width: backend.caretStyle === "block"
@@ -1406,6 +1455,7 @@ ApplicationWindow {
                 }
 
                 onTextChanged: {
+                    refreshFencedRanges();
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
@@ -1426,6 +1476,7 @@ ApplicationWindow {
 
                 Component.onCompleted: {
                     backend.attachDocument(textDocument);
+                    refreshFencedRanges();
                     forceActiveFocus();
                 }
             }
