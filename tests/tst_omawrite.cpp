@@ -1590,7 +1590,7 @@ private slots:
             QCOMPARE(backend.caretStyle(), QStringLiteral("line"));
             QVERIFY(backend.caretBlink());
             QCOMPARE(backend.editorMeasureChars(), 65);
-            QCOMPARE(backend.printMarginMm(), 20.0);
+            QCOMPARE(backend.printMarginMm(), 15.0);
 
             QSignalSpy caretSpy(&backend, &Backend::caretStyleChanged);
             backend.setCaretStyle(QStringLiteral("block"));
@@ -2855,6 +2855,58 @@ private slots:
         QVERIFY2(separation(printedPanel, QColor(Qt::white)) >= 15,
                  qPrintable(printedPanel.name()));
         QVERIFY(printedPanel.lightness() > 200);
+    }
+
+    // A long line of code used to run off the page: Qt marks code blocks
+    // non-breakable, so it was neither wrapped nor inside the panel, which
+    // only ever spans the measure. It was cut at the paper's edge.
+    void wrapsLongCodeLinesInsideThePage() {
+        Backend backend;
+        const QString longLine = QStringLiteral("open ") + QString(300, QLatin1Char('x'));
+        QTextDocument printed;
+        printed.setMarkdown(QStringLiteral("```bash\n") + longLine
+                            + QStringLiteral("\n```\n"));
+        backend.styleRenderedDocumentForTest(&printed, true);
+
+        QTextBlock code;
+        for (QTextBlock block = printed.begin(); block.isValid(); block = block.next()) {
+            if (block.text().contains(QStringLiteral("xxx")))
+                code = block;
+        }
+        QVERIFY(code.isValid());
+        QVERIFY2(!code.blockFormat().nonBreakableLines(),
+                 "code is still non-breakable, so a long line runs off the page");
+
+        // Laid out at a page's width, the line takes more than one row and
+        // nothing reaches past the measure.
+        printed.setTextWidth(480);
+        const QAbstractTextDocumentLayout *layout = printed.documentLayout();
+        const QRectF codeRect = layout->blockBoundingRect(code);
+        QVERIFY2(code.layout()->lineCount() > 1,
+                 qPrintable(QStringLiteral("the long line stayed on %1 row(s)")
+                                .arg(code.layout()->lineCount())));
+        QVERIFY2(codeRect.right() <= 481.0,
+                 qPrintable(QStringLiteral("code reached %1 past a 480 measure")
+                                .arg(codeRect.right())));
+    }
+
+    void printsTheBodyAtAReadableSizeOnPaper() {
+        // The editor's size is in pixels and the page's is in points; reading
+        // one as the other made a 20px editor print at 20pt.
+        Backend backend;
+        QCOMPARE(backend.printFontPointSize(), 11.0);
+
+        QSignalSpy spy(&backend, &Backend::printFontPointSizeChanged);
+        backend.setPrintFontPointSize(9.5);
+        QCOMPARE(spy.count(), 1);
+        backend.setPrintFontPointSize(1);
+        QCOMPARE(backend.printFontPointSize(), 6.0);
+        backend.setPrintFontPointSize(500);
+        QCOMPARE(backend.printFontPointSize(), 32.0);
+
+        // And the margin leaves a usable measure rather than a column.
+        Backend fresh;
+        QCOMPARE(fresh.printMarginMm(), 15.0);
     }
 
     void remembersLastSaveDirectory() {

@@ -102,6 +102,14 @@ Dialog {
                 onValueModified: backend.wordTarget = value
             }
 
+            FieldLabel { text: "Printed text size" }
+            SpinBox {
+                objectName: "printFontPointSizeBox"
+                from: 6; to: 32
+                value: Math.round(backend.printFontPointSize)
+                onValueModified: backend.printFontPointSize = value
+            }
+
             FieldLabel { text: "Return opens a paragraph" }
             Switch {
                 objectName: "paragraphOnReturnSwitch"

@@ -53,7 +53,10 @@ const QString bundledFontFamily = QStringLiteral("iA Writer Quattro S");
 constexpr int defaultEditorMeasureChars = 65;
 constexpr int minimumEditorMeasureChars = 20;
 constexpr int maximumEditorMeasureChars = 200;
-constexpr qreal defaultPrintMarginMm = 20.0;
+constexpr qreal defaultPrintMarginMm = 15.0;
+const QString printFontPointSizeSetting = QStringLiteral("print/fontPointSize");
+// Ordinary book and report body text. The editor's 20px means nothing here.
+constexpr qreal defaultPrintFontPointSize = 11.0;
 constexpr qreal maximumPrintMarginMm = 60.0;
 const QString wordTargetSetting = QStringLiteral("editor/wordTarget");
 const QString paragraphOnReturnSetting = QStringLiteral("editor/paragraphOnReturn");
@@ -157,6 +160,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_printMarginMm = qBound(qreal(0), QSettings().value(printMarginMmSetting,
                                                          defaultPrintMarginMm).toDouble(),
                              maximumPrintMarginMm);
+    m_printFontPointSize = qBound(qreal(6),
+                                  QSettings().value(printFontPointSizeSetting,
+                                                    defaultPrintFontPointSize).toDouble(),
+                                  qreal(32));
 
     m_wordTarget = qMax(0, QSettings().value(wordTargetSetting, 0).toInt());
     m_paragraphOnReturn =
@@ -584,6 +591,16 @@ void Backend::setParagraphOnReturn(bool paragraphOnReturn) {
     emit paragraphOnReturnChanged();
 }
 
+void Backend::setPrintFontPointSize(qreal pointSize) {
+    const qreal bounded = qBound(qreal(6), pointSize, qreal(32));
+    if (qFuzzyCompare(m_printFontPointSize, bounded))
+        return;
+
+    m_printFontPointSize = bounded;
+    QSettings().setValue(printFontPointSizeSetting, m_printFontPointSize);
+    emit printFontPointSizeChanged();
+}
+
 void Backend::setAutosave(bool autosave) {
     if (m_autosave == autosave)
         return;
@@ -849,6 +866,11 @@ void Backend::styleRenderedDocument(QTextDocument *document, bool forPrint) cons
             format.setTopMargin(opensRun ? gap : 0);
             format.setBottomMargin(closesRun ? gap : 0);
             format.setLineHeight(100, QTextBlockFormat::ProportionalHeight);
+            // Qt marks code non-breakable, which on a page means a long line
+            // runs past the measure and off the paper: the text is cut and the
+            // panel, which only ever spans the measure, stops short of it.
+            // Wrapping keeps the line on the page and inside the panel.
+            format.setNonBreakableLines(false);
             if (panel.isValid())
                 format.setBackground(panel);
         } else {
@@ -1173,12 +1195,12 @@ void Backend::printDocument() {
         printer.setPageLayout(layout);
 
         QTextDocument rendered;
-        const QScreen *screen = QGuiApplication::primaryScreen();
-        QFont printed = printFont(m_document->defaultFont(),
-                                  screen ? screen->logicalDotsPerInchY() : 0.0);
-        // The page follows the editor, so what is printed reads as what was
-        // written rather than as a different document.
-        printed.setFamily(m_editorFontFamily);
+        // The face follows the editor so the page reads as what was written,
+        // but the size is the print setting: the editor's pixel size is a
+        // screen measurement, and reading it through the screen's DPI -- 72 on
+        // macOS -- turned a 20px editor into 20pt on paper.
+        QFont printed(m_editorFontFamily);
+        printed.setPointSizeF(m_printFontPointSize);
         rendered.setDefaultFont(printed);
         rendered.setMarkdown(renderableDocumentText());
         // Printing rendered a bare document before this: no paragraph spacing,

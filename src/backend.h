@@ -37,6 +37,8 @@ class Backend : public QObject {
                NOTIFY editorMeasureCharsChanged)
     Q_PROPERTY(qreal printMarginMm READ printMarginMm WRITE setPrintMarginMm
                NOTIFY printMarginMmChanged)
+    Q_PROPERTY(qreal printFontPointSize READ printFontPointSize
+               WRITE setPrintFontPointSize NOTIFY printFontPointSizeChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString appCommit READ appCommit CONSTANT)
     Q_PROPERTY(QUrl appCommitUrl READ appCommitUrl CONSTANT)
@@ -113,6 +115,10 @@ public:
     void setEditorMeasureChars(int measureChars);
     qreal printMarginMm() const { return m_printMarginMm; }
     void setPrintMarginMm(qreal marginMm);
+    // A page is not a screen: the editor's size in pixels means nothing on
+    // paper, so the printed size is its own setting in points.
+    qreal printFontPointSize() const { return m_printFontPointSize; }
+    void setPrintFontPointSize(qreal pointSize);
 
     // The family actually used: the request when the system has it, and the
     // bundled face when it does not, so a font named in settings on one
@@ -227,6 +233,7 @@ signals:
     void caretBlinkChanged();
     void editorMeasureCharsChanged();
     void printMarginMmChanged();
+    void printFontPointSizeChanged();
     void wordTargetChanged();
     void paragraphOnReturnChanged();
     void autosaveChanged();
@@ -301,7 +308,8 @@ private:
     QString m_caretStyle;
     bool m_caretBlink = true;
     int m_editorMeasureChars = 65;
-    qreal m_printMarginMm = 20.0;
+    qreal m_printMarginMm = 15.0;
+    qreal m_printFontPointSize = 11.0;
     int m_wordTarget = 0;
     bool m_paragraphOnReturn = false;
     bool m_autosave = true;
