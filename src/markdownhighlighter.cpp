@@ -107,24 +107,26 @@ void MarkdownHighlighter::rebuildFormats() {
     // other two are fixed pairs, picked to sit against either page without
     // competing with the accent.
     m_codeCommentFormat = m_codeFormat;
-    m_codeCommentFormat.setForeground(marker);
+    m_codeCommentFormat.setForeground(
+        codeTokenColor(CodeToken::Comment, m_darkMode, link, marker));
     m_codeCommentFormat.setFontItalic(true);
 
     m_codeStringFormat = m_codeFormat;
-    m_codeStringFormat.setForeground(m_darkMode ? QColor(QStringLiteral("#8fd4ae"))
-                                                : QColor(QStringLiteral("#0b7a5a")));
+    m_codeStringFormat.setForeground(
+        codeTokenColor(CodeToken::String, m_darkMode, link, marker));
 
     m_codeNumberFormat = m_codeFormat;
-    m_codeNumberFormat.setForeground(m_darkMode ? QColor(QStringLiteral("#e2a978"))
-                                                : QColor(QStringLiteral("#9a5300")));
+    m_codeNumberFormat.setForeground(
+        codeTokenColor(CodeToken::Number, m_darkMode, link, marker));
 
     m_codeKeywordFormat = m_codeFormat;
-    m_codeKeywordFormat.setForeground(link);
+    m_codeKeywordFormat.setForeground(
+        codeTokenColor(CodeToken::Keyword, m_darkMode, link, marker));
     m_codeKeywordFormat.setFontWeight(QFont::DemiBold);
 
     m_codeFunctionFormat = m_codeFormat;
-    m_codeFunctionFormat.setForeground(m_darkMode ? QColor(QStringLiteral("#9db8f0"))
-                                                  : QColor(QStringLiteral("#3b5fa8")));
+    m_codeFunctionFormat.setForeground(
+        codeTokenColor(CodeToken::Function, m_darkMode, link, marker));
 
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
@@ -256,6 +258,28 @@ const LanguageRules *rulesFor(const QString &language) {
 bool isWordCharacter(QChar character) {
     return character.isLetterOrNumber() || character == QLatin1Char('_');
 }
+}
+
+QColor MarkdownHighlighter::codeTokenColor(CodeToken token, bool darkMode,
+                                           const QColor &accent, const QColor &muted) {
+    switch (token) {
+    case CodeToken::Comment:
+        return muted;
+    case CodeToken::String:
+        return darkMode ? QColor(QStringLiteral("#8fd4ae"))
+                        : QColor(QStringLiteral("#0b7a5a"));
+    case CodeToken::Number:
+        return darkMode ? QColor(QStringLiteral("#e2a978"))
+                        : QColor(QStringLiteral("#9a5300"));
+    case CodeToken::Keyword:
+        // The theme's accent, so highlighted code belongs to the document
+        // rather than looking like a widget dropped into it.
+        return accent;
+    case CodeToken::Function:
+        return darkMode ? QColor(QStringLiteral("#9db8f0"))
+                        : QColor(QStringLiteral("#3b5fa8"));
+    }
+    return accent;
 }
 
 QString MarkdownHighlighter::languageForFence(const QString &fenceLine) {

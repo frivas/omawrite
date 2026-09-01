@@ -818,10 +818,17 @@ void Backend::styleRenderedDocument(QTextDocument *document, bool forPrint) cons
     const qreal gap = QFontMetricsF(document->defaultFont()).height()
         * typoraLineHeightPercent / 100.0;
 
-    // Paper is white however the app is themed, so a printed panel comes from
-    // the light palette. On screen the preview follows the editor.
+    // Paper is white however the app is themed, so a printed page takes the
+    // light palette throughout -- panel and highlighting both. On screen the
+    // preview follows the editor.
+    const bool darkPalette = forPrint ? false : m_darkMode;
     const QColor panel = forPrint ? QColor(QStringLiteral("#f2f1ee"))
                                   : QColor(m_themeCodeBackground);
+    // A printed accent has to hold up on white; on screen it is the theme's.
+    const QColor accent = forPrint ? QColor(QStringLiteral("#0b5aa6"))
+                                   : QColor(m_themeAccent);
+    const QColor muted = forPrint ? QColor(QStringLiteral("#6b7280"))
+                                  : QColor(m_themeForeground).lighter(160);
 
     QTextCursor cursor(document);
     cursor.beginEditBlock();
@@ -867,6 +874,28 @@ void Backend::styleRenderedDocument(QTextDocument *document, bool forPrint) cons
             cursor.setPosition(block.position() + block.length() - 1,
                                QTextCursor::KeepAnchor);
             cursor.mergeCharFormat(monospaced);
+
+            // And the same highlighting the editor gives it. Reading the same
+            // code in two palettes, or in one and not the other, reads as two
+            // different documents.
+            const QString language = MarkdownHighlighter::languageForFence(
+                QStringLiteral("```")
+                + block.blockFormat().stringProperty(QTextFormat::BlockCodeLanguage));
+            for (const auto &token :
+                     MarkdownHighlighter::codeTokens(block.text(), language)) {
+                QTextCharFormat coloured;
+                coloured.setForeground(MarkdownHighlighter::codeTokenColor(
+                    token.token, darkPalette, accent, muted));
+                if (token.token == MarkdownHighlighter::CodeToken::Comment)
+                    coloured.setFontItalic(true);
+                if (token.token == MarkdownHighlighter::CodeToken::Keyword)
+                    coloured.setFontWeight(QFont::DemiBold);
+
+                cursor.setPosition(block.position() + token.start);
+                cursor.setPosition(block.position() + token.start + token.length,
+                                   QTextCursor::KeepAnchor);
+                cursor.mergeCharFormat(coloured);
+            }
         }
     }
     cursor.endEditBlock();

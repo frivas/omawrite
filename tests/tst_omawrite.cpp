@@ -8,6 +8,8 @@
 #include <QWheelEvent>
 #include <QPainter>
 #include <QAbstractTextDocumentLayout>
+#include <QSet>
+#include <QTextFragment>
 #include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QPrinter>
@@ -2663,11 +2665,20 @@ private slots:
                 && qAbs(pixel.blue() - panel.blue()) <= 3;
         };
 
+        // Counted across the row rather than sampled at two points: the code
+        // is highlighted now, so a fixed point can land on a keyword.
+        int panelRun = 0;
+        for (int x = 0; x < page.width(); ++x) {
+            if (isPanel(x))
+                ++panelRun;
+        }
+        QVERIFY2(panelRun > page.width() / 2,
+                 qPrintable(QStringLiteral("only %1 of %2 pixels were panel")
+                                .arg(panelRun).arg(page.width())));
+
         // Well past "def hello():", where a character background would have
         // stopped and left the page showing through.
         QVERIFY2(isPanel(560), qPrintable(page.pixelColor(560, y).name()));
-        // And at the very start of the line.
-        QVERIFY2(isPanel(4), qPrintable(page.pixelColor(4, y).name()));
         // The page above the block is not the panel, or this proves nothing.
         QVERIFY(page.pixelColor(560, 2) != panel);
     }
@@ -2734,6 +2745,78 @@ private slots:
         QCOMPARE(code.begin().fragment().charFormat().fontFamilies()
                      .toStringList().value(0),
                  QStringLiteral("iA Writer Mono S"));
+    }
+
+    // The rendered page had a panel and a monospaced face but no colour at
+    // all: the tokeniser only ever ran in the editor's highlighter. Reading
+    // the same code highlighted in one view and flat in the other reads as two
+    // different documents.
+    void highlightsCodeInTheRenderedPageToo() {
+        QQmlEngine engine;
+        QScopedPointer<QObject> harness(makeRenderHarness(engine));
+        QVERIFY(harness);
+
+        Backend backend;
+        const QString source = QStringLiteral(
+            "```python\ndef hello():\n    return \"hi\"  # a comment\n```\n");
+
+        QTextDocument rendered;
+        rendered.setMarkdown(source);
+        backend.styleRenderedDocumentForTest(&rendered, false);
+
+        // Collect every colour the code is drawn in.
+        QSet<QString> colours;
+        bool sawItalic = false;
+        bool sawBold = false;
+        for (QTextBlock block = rendered.begin(); block.isValid(); block = block.next()) {
+            if (block.blockFormat().background().style() == Qt::NoBrush)
+                continue;
+            for (auto it = block.begin(); it != block.end(); ++it) {
+                const QTextFragment fragment = it.fragment();
+                if (!fragment.isValid())
+                    continue;
+                colours.insert(fragment.charFormat().foreground().color().name());
+                sawItalic = sawItalic || fragment.charFormat().fontItalic();
+                sawBold = sawBold
+                    || fragment.charFormat().fontWeight() >= QFont::DemiBold;
+                // And every fragment is monospaced, colour or not.
+                QCOMPARE(fragment.charFormat().fontFamilies().toStringList().value(0),
+                         QStringLiteral("iA Writer Mono S"));
+            }
+        }
+
+        // def and return are keywords, "hi" a string, the trailing # a comment:
+        // several distinct colours, not one.
+        QVERIFY2(colours.size() >= 3,
+                 qPrintable(QStringLiteral("only %1 colour(s) in the rendered code")
+                                .arg(colours.size())));
+        QVERIFY(sawItalic);   // the comment
+        QVERIFY(sawBold);     // the keywords
+
+        // Printing takes the light palette, so its colours differ from a dark
+        // preview's rather than being handed straight through.
+        backend.setDarkMode(true);
+        QTextDocument previewed;
+        previewed.setMarkdown(source);
+        backend.styleRenderedDocumentForTest(&previewed, false);
+
+        QTextDocument printed;
+        printed.setMarkdown(source);
+        backend.styleRenderedDocumentForTest(&printed, true);
+
+        auto firstColour = [](const QTextDocument &document) {
+            for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+                if (block.blockFormat().background().style() == Qt::NoBrush)
+                    continue;
+                for (auto it = block.begin(); it != block.end(); ++it) {
+                    if (it.fragment().isValid())
+                        return it.fragment().charFormat().foreground().color();
+                }
+            }
+            return QColor();
+        };
+        QVERIFY(firstColour(printed).isValid());
+        QVERIFY(firstColour(printed) != firstColour(previewed));
     }
 
     void remembersLastSaveDirectory() {

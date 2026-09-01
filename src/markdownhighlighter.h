@@ -2,6 +2,7 @@
 
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
+#include <QColor>
 #include <QTextCharFormat>
 
 class MarkdownHighlighter : public QSyntaxHighlighter {
@@ -74,6 +75,12 @@ public:
     // comment that runs across lines is rare in a snippet and not worth the
     // state to track.
     static QList<CodeSpanToken> codeTokens(const QString &line, const QString &language);
+
+    // The colour a token is drawn in. One place, because the editor and the
+    // rendered page have to agree: highlighted code that changes palette when
+    // you press Ctrl+/ reads as a different document.
+    static QColor codeTokenColor(CodeToken token, bool darkMode,
+                                 const QColor &accent, const QColor &muted);
 
     // The languages the tokeniser knows, in the order the block state indexes
     // them. One-based in the state, so zero can mean "plain code".
