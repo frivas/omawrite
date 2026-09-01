@@ -2819,6 +2819,44 @@ private slots:
         QVERIFY(firstColour(printed) != firstColour(previewed));
     }
 
+    // The panel has to be visibly grey, not a shade that reads as the page.
+    // It is easy to derive one so subtle it looks like the feature is missing.
+    void keepsTheCodePanelVisibleAgainstThePage() {
+        auto separation = [](const QColor &panel, const QColor &page) {
+            return qAbs(panel.lightness() - page.lightness());
+        };
+
+        for (bool dark : {false, true}) {
+            Backend backend;
+            backend.setDarkMode(dark);
+            const QColor panel(backend.themeCodeBackground());
+            const QColor page(backend.themeBackground());
+            QVERIFY(panel.isValid());
+            QVERIFY2(separation(panel, page) >= 15,
+                     qPrintable(QStringLiteral("%1 on %2 is too close to see")
+                                    .arg(panel.name(), page.name())));
+            // And not so heavy it becomes a slab.
+            QVERIFY(separation(panel, page) <= 60);
+        }
+
+        // The printed panel too, against white paper.
+        Backend backend;
+        QTextDocument printed;
+        printed.setMarkdown(QStringLiteral("```python\ndef hello():\n    return 1\n```\n"));
+        backend.styleRenderedDocumentForTest(&printed, true);
+        QColor printedPanel;
+        for (QTextBlock block = printed.begin(); block.isValid(); block = block.next()) {
+            if (block.blockFormat().background().style() != Qt::NoBrush) {
+                printedPanel = block.blockFormat().background().color();
+                break;
+            }
+        }
+        QVERIFY(printedPanel.isValid());
+        QVERIFY2(separation(printedPanel, QColor(Qt::white)) >= 15,
+                 qPrintable(printedPanel.name()));
+        QVERIFY(printedPanel.lightness() > 200);
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());

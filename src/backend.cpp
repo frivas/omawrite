@@ -822,7 +822,7 @@ void Backend::styleRenderedDocument(QTextDocument *document, bool forPrint) cons
     // light palette throughout -- panel and highlighting both. On screen the
     // preview follows the editor.
     const bool darkPalette = forPrint ? false : m_darkMode;
-    const QColor panel = forPrint ? QColor(QStringLiteral("#f2f1ee"))
+    const QColor panel = forPrint ? QColor(QStringLiteral("#edece8"))
                                   : QColor(m_themeCodeBackground);
     // A printed accent has to hold up on white; on screen it is the theme's.
     const QColor accent = forPrint ? QColor(QStringLiteral("#0b5aa6"))
@@ -1673,7 +1673,7 @@ void Backend::loadOmarchyTheme() {
     const QColor lighter(m_themeLighterBackground);
     m_themeCodeBackground = (lighter.isValid() && lighter != page
                                  ? lighter
-                                 : blend(page, QColor(m_themeForeground), 0.06)).name();
+                                 : blend(page, QColor(m_themeForeground), 0.10)).name();
 
     if (m_highlighter) {
         m_highlighter->setDarkMode(m_darkMode);
