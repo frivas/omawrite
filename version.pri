@@ -4,7 +4,7 @@
 # Upstream's v0.5.0 is this fork's base -- its tag is our merge base -- plus
 # the macOS work on top, so the version says both. The .pro said 0.1.0, which
 # was never true of this code.
-VERSION = 0.5.0-macos.2
+VERSION = 0.5.0-macos.3
 
 OMAWRITE_COMMIT = $$system(git -C $$PWD rev-parse --short HEAD 2>/dev/null)
 isEmpty(OMAWRITE_COMMIT): OMAWRITE_COMMIT = unknown
