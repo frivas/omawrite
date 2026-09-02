@@ -120,7 +120,13 @@ $SHA
 Built from \`$COMMIT\`, which About names and links to.
 NOTES
 
+# gh resolves a fork's default repo to its parent, so the repository is named
+# explicitly from origin. A release must never land on upstream.
+GH_REPO="$(git remote get-url origin \
+  | sed -e 's|^https://github.com/||' -e 's|^git@github\.com:||' -e 's|\.git$||')"
+
 gh release create "$TAG" \
+  --repo "$GH_REPO" \
   --title "Omawrite for macOS $VERSION" \
   --notes-file "$notes" \
   "$STAGE/Omawrite-$TAG-macos-arm64.dmg" \
