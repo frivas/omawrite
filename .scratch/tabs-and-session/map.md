@@ -1,0 +1,34 @@
+# Tabs and session
+
+## Destination
+
+Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit is hot exit: the session comes back on launch (every window, its tabs, unsaved work). Closing a tab drops it from the session, with a save / discard / cancel prompt if it has unsaved work.
+
+## Notes
+
+- Domain language: [`CONTEXT.md`](../../CONTEXT.md). Consult `/domain-modeling` when a term shifts.
+- Skills: `/graphify` for how the current code is shaped; `/grilling` and `/prototype` on HITL tickets.
+- Tracker: local markdown under `.scratch/tabs-and-session/`.
+- Standing preferences already locked while charting (not restated on tickets):
+  - Tabs live **inside** windows; several windows stay legal. Cmd/Ctrl+N opens a **tab** in the current window. A new window is a separate action.
+  - Restore is a **full session**. Never-saved documents return from cache; dirty named tabs return dirty; clean named tabs reload from disk.
+  - **Hot exit**: quit does not ask to pick a file. Close-tab is where work is thrown away.
+  - Named-file **autosave stays as today**. Untitled documents never autosave onto a user-chosen path. Cmd/Ctrl+S saves the **active** tab (picker if it has no path).
+- Graphify (code graph, no `tab` vocabulary): one `Backend` and one `QTextDocument` per window; `save` / `saveForClose` / `restoreRecovery` / `newWindow` on that backend; untitled work is snapshotted (`snapshotsUntitledDocumentsInsteadOfSavingThem`); `OmawriteApplication` in `src/main.cpp` owns window-level file-open.
+
+## Decisions so far
+
+- [Today’s document, window, save, and recovery model](issues/01-today-document-window-save-recovery.md) — One window is one Backend/document/process; named autosave and crash snapshots stay as constraints, process-spawn New Window and crash-slot restore must be replaced.
+
+## Not yet specified
+
+- How the session is stored on disk (layout vs document bodies; what replaces today’s crash snapshot).
+- External file-change prompts when several tabs (and windows) are open.
+- Dragging a tab into a new window.
+- Whether find, print, and preferences stay strictly scoped to the active document (likely yes; not ticketed until a contradiction appears).
+
+## Out of scope
+
+- Tab groups, split panes, or a single-window-only app.
+- Syncing the session across machines.
+- Changing Markdown rendering, content blocks, or the highlighter.
