@@ -14,6 +14,7 @@
 #include <QVector>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QList>
 #include <memory>
 
 class MarkdownHighlighter;
@@ -99,6 +100,13 @@ public:
     ~Backend() override;
 
     void setParentWindow(QWindow *window);
+    QWindow *parentWindow() const;
+    static QList<Backend *> liveWindows();
+    static int storedWindowCount();
+    // Persist every live window, then ignore destructor writes so tearing
+    // windows down one at a time cannot shrink the session to the last one.
+    static void prepareToQuit();
+    static void allowSessionWrites();
 
     QUrl fileUrl() const { return m_fileUrl; }
     QString fileName() const;
@@ -205,6 +213,9 @@ public:
     Q_INVOKABLE void setActiveTab(int index);
     Q_INVOKABLE void persistSession();
     Q_INVOKABLE void adoptTabFrom(QObject *sourceWindow, int index);
+    Q_INVOKABLE void takeDetachedTab(QObject *sourceWindow, int index);
+    Q_INVOKABLE void moveTab(int from, int to);
+    Q_INVOKABLE void finishTabDrag(int index, qreal globalX, qreal globalY);
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
@@ -260,6 +271,8 @@ signals:
     void themeColorsChanged();
     void tabsChanged();
     void closeWindowRequested();
+    void newWindowRequested();
+    void detachTabRequested(int index);
     void tabCloseNeedsConfirm(int index);
     void closeAfterSave();
     void openDialogRequested();
@@ -315,11 +328,11 @@ private:
     void restoreRecovery();
     void clearRecovery();
     void ensureTab();
+    bool isBlankUntitled() const;
     int indexOfLocalPath(const QString &path) const;
     int nextUntitledNumber() const;
     QJsonObject sessionObject() const;
     static void writeSessionFile(const QJsonArray &windows);
-    static QList<Backend *> liveWindows();
     void loadTabFields(int index);
     void storeTabFields(int index);
     void setKnownFileContents(const QByteArray &contents, bool known);

@@ -26,6 +26,8 @@
 #include <QDir>
 #include <QFile>
 #include <QTextDocument>
+#include <QWindow>
+#include <QSignalSpy>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -45,6 +47,7 @@ private slots:
     }
 
     void init() {
+        Backend::allowSessionWrites();
         QSettings().clear();
         const QString stateDirectory =
             QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -3148,6 +3151,304 @@ private slots:
         QCOMPARE(source.tabCount(), 1);
     }
 
+    void reordersTabsInTheSameWindow() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("first.md"));
+        const QString second = directory.filePath(QStringLiteral("second.md"));
+        {
+            QFile a(first);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("one");
+            QFile b(second);
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("two");
+        }
+
+        Backend backend;
+        QVERIFY(attachTextEdit(&backend));
+        backend.open(QUrl::fromLocalFile(first));
+        backend.open(QUrl::fromLocalFile(second));
+        QCOMPARE(backend.activeTabIndex(), 1);
+        QCOMPARE(backend.fileName(), QStringLiteral("second.md"));
+
+        backend.moveTab(1, 0);
+        QCOMPARE(backend.activeTabIndex(), 0);
+        QCOMPARE(backend.fileName(), QStringLiteral("second.md"));
+        backend.setActiveTab(1);
+        QCOMPARE(backend.fileName(), QStringLiteral("first.md"));
+    }
+
+    void newWindowAsksForAnotherWritingWindow() {
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> root(openWritingWindow(&backend, &engine));
+        QVERIFY(root);
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->requestActivate();
+        QTRY_VERIFY(window->isActive());
+
+        QSignalSpy spy(&backend, &Backend::newWindowRequested);
+        backend.newWindow();
+        QCOMPARE(spy.count(), 1);
+
+        QScopedPointer<Backend> second;
+        QQmlEngine secondEngine;
+        QScopedPointer<QObject> secondRoot;
+        QObject::connect(&backend, &Backend::newWindowRequested, this, [&]() {
+            second.reset(new Backend);
+            secondRoot.reset(openWritingWindow(second.data(), &secondEngine));
+        });
+        QTest::keyClick(window, Qt::Key_N, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(spy.count(), 2);
+        QVERIFY(second);
+        QVERIFY(secondRoot);
+        QVERIFY(secondRoot->findChild<QQuickItem *>(QStringLiteral("tabStrip")));
+        QCOMPARE(Backend::liveWindows().size(), 2);
+    }
+
+    void restoresTwoWindowsFromTheSessionFile() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("left.md"));
+        const QString second = directory.filePath(QStringLiteral("right.md"));
+        {
+            QFile a(first);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("left body");
+            QFile b(second);
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("right body");
+        }
+
+        const QJsonObject session{
+            {QStringLiteral("windows"),
+             QJsonArray{
+                 QJsonObject{
+                     {QStringLiteral("activeTab"), 0},
+                     {QStringLiteral("tabs"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("fileUrl"), QUrl::fromLocalFile(first).toString()},
+                          {QStringLiteral("modified"), false},
+                      }}},
+                 },
+                 QJsonObject{
+                     {QStringLiteral("activeTab"), 0},
+                     {QStringLiteral("tabs"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("fileUrl"), QUrl::fromLocalFile(second).toString()},
+                          {QStringLiteral("modified"), false},
+                      }}},
+                 },
+             }},
+        };
+        QDir().mkpath(QFileInfo(Backend::sessionPath()).absolutePath());
+        QFile sessionFile(Backend::sessionPath());
+        QVERIFY(sessionFile.open(QIODevice::WriteOnly));
+        sessionFile.write(QJsonDocument(session).toJson(QJsonDocument::Compact));
+        sessionFile.close();
+        QCOMPARE(Backend::storedWindowCount(), 2);
+
+        Backend left;
+        QQuickTextDocument *leftDocument = attachTextEdit(&left);
+        QVERIFY(leftDocument);
+        QCOMPARE(left.fileName(), QStringLiteral("left.md"));
+        QCOMPARE(leftDocument->textDocument()->toPlainText(), QStringLiteral("left body"));
+
+        Backend right;
+        QQuickTextDocument *rightDocument = attachTextEdit(&right);
+        QVERIFY(rightDocument);
+        QCOMPARE(right.fileName(), QStringLiteral("right.md"));
+        QCOMPARE(rightDocument->textDocument()->toPlainText(), QStringLiteral("right body"));
+    }
+
+    void quittingKeepsEveryWindowInTheSession() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("keep-a.md"));
+        const QString second = directory.filePath(QStringLiteral("keep-b.md"));
+        {
+            QFile a(first);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("a");
+            QFile b(second);
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("b");
+        }
+
+        {
+            Backend left;
+            QVERIFY(attachTextEdit(&left));
+            left.open(QUrl::fromLocalFile(first));
+            Backend right;
+            QVERIFY(attachTextEdit(&right));
+            right.open(QUrl::fromLocalFile(second));
+            Backend::prepareToQuit();
+        }
+
+        QCOMPARE(Backend::storedWindowCount(), 2);
+        Backend::allowSessionWrites();
+
+        Backend left;
+        QVERIFY(attachTextEdit(&left));
+        QCOMPARE(left.fileName(), QStringLiteral("keep-a.md"));
+        Backend right;
+        QVERIFY(attachTextEdit(&right));
+        QCOMPARE(right.fileName(), QStringLiteral("keep-b.md"));
+    }
+
+    void droppingATabOntoAnotherWindowMovesIt() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("cargo.md"));
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+            file.write("cargo");
+        }
+
+        Backend source;
+        QQmlEngine sourceEngine;
+        QScopedPointer<QObject> sourceRoot(openWritingWindow(&source, &sourceEngine));
+        QVERIFY(sourceRoot);
+        Backend destination;
+        QQmlEngine destEngine;
+        QScopedPointer<QObject> destRoot(openWritingWindow(&destination, &destEngine));
+        QVERIFY(destRoot);
+
+        auto *sourceWindow = qobject_cast<QQuickWindow *>(sourceRoot.data());
+        auto *destWindow = qobject_cast<QQuickWindow *>(destRoot.data());
+        QVERIFY(sourceWindow);
+        QVERIFY(destWindow);
+        sourceWindow->setGeometry(0, 0, 400, 400);
+        destWindow->setGeometry(800, 0, 400, 400);
+        QCoreApplication::processEvents();
+        QVERIFY(!sourceWindow->geometry().contains(destWindow->geometry().center()));
+        QVERIFY(destWindow->geometry().contains(destWindow->geometry().center()));
+
+        source.open(QUrl::fromLocalFile(path));
+        source.newTab();
+        QCOMPARE(source.tabCount(), 2);
+
+        const QPoint destPoint = destWindow->geometry().center();
+        source.finishTabDrag(0, destPoint.x(), destPoint.y());
+        QCOMPARE(destination.fileName(), QStringLiteral("cargo.md"));
+        QCOMPARE(source.tabCount(), 1);
+        QCOMPARE(destination.tabCount(), 2);
+        QVERIFY(sourceRoot->findChild<QQuickItem *>(QStringLiteral("tabStrip")));
+        QVERIFY(destRoot->findChild<QQuickItem *>(QStringLiteral("tabStrip")));
+    }
+
+    void droppingATabOffEveryWindowDetachesIt() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("solo.md"));
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+            file.write("alone");
+        }
+
+        Backend source;
+        QQmlEngine sourceEngine;
+        QScopedPointer<QObject> sourceRoot(openWritingWindow(&source, &sourceEngine));
+        QVERIFY(sourceRoot);
+        auto *sourceWindow = qobject_cast<QQuickWindow *>(sourceRoot.data());
+        QVERIFY(sourceWindow);
+        sourceWindow->setGeometry(0, 0, 400, 400);
+        QCoreApplication::processEvents();
+
+        source.open(QUrl::fromLocalFile(path));
+        QSignalSpy detachSpy(&source, &Backend::detachTabRequested);
+        source.finishTabDrag(0, -2000, -500);
+        QCOMPARE(detachSpy.count(), 1);
+        QCOMPARE(detachSpy.at(0).at(0).toInt(), 0);
+
+        Backend created;
+        QQmlEngine createdEngine;
+        QScopedPointer<QObject> createdRoot(openWritingWindow(&created, &createdEngine));
+        QVERIFY(createdRoot);
+        QSignalSpy closeSpy(&source, &Backend::closeWindowRequested);
+        created.takeDetachedTab(&source, 0);
+        QCOMPARE(created.tabCount(), 1);
+        QCOMPARE(created.fileName(), QStringLiteral("solo.md"));
+        QCOMPARE(source.tabCount(), 0);
+        QCOMPARE(closeSpy.count(), 1);
+        QTRY_VERIFY(!sourceWindow->isVisible());
+    }
+
+    void closingTheLastTabClosesTheWritingWindow() {
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> root(openWritingWindow(&backend, &engine));
+        QVERIFY(root);
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        QVERIFY(window->isVisible());
+        QVERIFY(backend.closeTab(0));
+        QTRY_VERIFY(!window->isVisible());
+    }
+
+    void closingADirtyTabAsksBeforeDroppingIt() {
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> root(openWritingWindow(&backend, &engine));
+        QVERIFY(root);
+        QObject *editor = root->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("keep me"));
+        QTRY_VERIFY(backend.modified());
+
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "requestCloseTab",
+                                          Q_ARG(QVariant, 0)));
+        auto *dialog = root->findChild<QObject *>(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QObject *discard = root->findChild<QObject *>(QStringLiteral("discardUnsavedButton"));
+        QVERIFY(discard);
+        QVERIFY(QMetaObject::invokeMethod(discard, "clicked"));
+        QTRY_COMPARE(backend.tabCount(), 0);
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        QTRY_VERIFY(!window->isVisible());
+    }
+
+    void externalChangeOnABackgroundTabSwitchesToIt() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("front.md"));
+        const QString second = directory.filePath(QStringLiteral("back.md"));
+        {
+            QFile a(first);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("front");
+            QFile b(second);
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("back");
+        }
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> root(openWritingWindow(&backend, &engine));
+        QVERIFY(root);
+        backend.open(QUrl::fromLocalFile(first));
+        backend.open(QUrl::fromLocalFile(second));
+        backend.setActiveTab(0);
+        QCOMPARE(backend.activeTabIndex(), 0);
+        QCOMPARE(backend.fileName(), QStringLiteral("front.md"));
+
+        QSignalSpy spy(&backend, &Backend::externalChangeDetected);
+        QFile file(second);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text));
+        QCOMPARE(file.write("changed"), qint64(7));
+        file.close();
+        QTRY_VERIFY(spy.count() >= 1);
+        QCOMPARE(backend.activeTabIndex(), 1);
+        QCOMPARE(backend.fileName(), QStringLiteral("back.md"));
+        QVERIFY(root->findChild<QObject *>(QStringLiteral("externalChangeHeading")));
+    }
+
     void tabStripIsOnTheWritingWindow() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -3169,6 +3470,21 @@ private slots:
     }
 
 private:
+    QObject *openWritingWindow(Backend *backend, QQmlEngine *engine) {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        if (mainQmlPath.isEmpty())
+            return nullptr;
+        engine->rootContext()->setContextProperty(QStringLiteral("backend"), backend);
+        QQmlComponent component(engine, QUrl::fromLocalFile(mainQmlPath));
+        if (!component.isReady())
+            return nullptr;
+        QObject *window = component.create();
+        if (!window)
+            return nullptr;
+        backend->setParentWindow(qobject_cast<QWindow *>(window));
+        return window;
+    }
+
     static void sendTouchpadWheel(QQuickWindow *window, const QPointF &position,
                                   int pixelDeltaY, Qt::ScrollPhase phase) {
         QWheelEvent event(position, window->mapToGlobal(position),

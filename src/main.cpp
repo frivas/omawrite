@@ -11,6 +11,7 @@
 #include <QUrl>
 #include <QWindow>
 #include <QFile>
+#include <QList>
 
 #include <functional>
 #include <utility>
@@ -73,11 +74,7 @@ int main(int argc, char *argv[]) {
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
-    Backend backend(&app);
     SystemTheme systemTheme(&app);
-    backend.setDarkMode(systemTheme.darkMode());
-    QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
-                     &Backend::setDarkMode);
 
     // Carry the desktop's text scale into the default font, so the chrome that
     // inherits it (dialog titles, buttons) grows along with the writing area.
@@ -92,40 +89,81 @@ int main(int argc, char *argv[]) {
     };
     applyInterfaceFont(systemTheme.textScale());
 
-    backend.setTextScale(systemTheme.textScale());
-    QObject::connect(&systemTheme, &SystemTheme::textScaleChanged, &backend,
-                     [&backend, applyInterfaceFont](qreal textScale) {
+    std::function<Backend *()> spawnWindow;
+    spawnWindow = [&]() -> Backend * {
+        auto *backend = new Backend(&app);
+        backend->setDarkMode(systemTheme.darkMode());
+        backend->setTextScale(systemTheme.textScale());
+
+        auto *engine = new QQmlApplicationEngine(&app);
+        QObject::connect(engine, &QQmlApplicationEngine::warnings, &app,
+                         [](const QList<QQmlError> &warnings) {
+            for (const QQmlError &warning : warnings)
+                qWarning().noquote() << warning.toString();
+        });
+        engine->rootContext()->setContextProperty(QStringLiteral("backend"), backend);
+        engine->load(QUrl(QStringLiteral("qrc:/Main.qml")));
+        if (engine->rootObjects().isEmpty()) {
+            qCritical() << "Could not load the Omawrite interface; resource available:"
+                        << QFile::exists(QStringLiteral(":/Main.qml"));
+            engine->deleteLater();
+            backend->deleteLater();
+            return nullptr;
+        }
+
+        backend->setParentWindow(qobject_cast<QWindow *>(engine->rootObjects().constFirst()));
+        QObject::connect(backend, &Backend::newWindowRequested, &app,
+                         [&]() { spawnWindow(); });
+        QObject::connect(backend, &Backend::detachTabRequested, &app,
+                         [backend, &spawnWindow](int index) {
+            Backend *created = spawnWindow();
+            if (created)
+                created->takeDetachedTab(backend, index);
+        });
+        return backend;
+    };
+
+    QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &app, [](bool darkMode) {
+        for (Backend *window : Backend::liveWindows())
+            window->setDarkMode(darkMode);
+    });
+    QObject::connect(&systemTheme, &SystemTheme::textScaleChanged, &app,
+                     [applyInterfaceFont](qreal textScale) {
         applyInterfaceFont(textScale);
-        backend.setTextScale(textScale);
+        for (Backend *window : Backend::liveWindows())
+            window->setTextScale(textScale);
+    });
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
+        Backend::prepareToQuit();
     });
 
-    QQmlApplicationEngine engine;
-    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
-                     [](const QList<QQmlError> &warnings) {
-        for (const QQmlError &warning : warnings)
-            qWarning().noquote() << warning.toString();
-    });
-    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-
-    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
-    if (engine.rootObjects().isEmpty()) {
-        qCritical() << "Could not load the Omawrite interface; resource available:"
-                    << QFile::exists(QStringLiteral(":/Main.qml"));
-        return -1;
+    const int windowCount = qMax(1, Backend::storedWindowCount());
+    for (int i = 0; i < windowCount; ++i) {
+        if (!spawnWindow())
+            return -1;
     }
 
-    backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
-
     const QStringList args = app.arguments();
-    if (args.size() > 1 && !backend.modified())
-        backend.open(QUrl::fromLocalFile(args.at(1)));
+    const QList<Backend *> live = Backend::liveWindows();
+    Backend *first = live.isEmpty() ? nullptr : live.constFirst();
+    if (first && args.size() > 1 && !first->modified())
+        first->open(QUrl::fromLocalFile(args.at(1)));
 
-    // Finder delivers documents through QFileOpenEvent rather than argv. Keep
-    // one document per window, matching the existing New Window behavior.
-    app.setFileOpenHandler([&backend](const QUrl &url) {
-        if (!url.isLocalFile() || url == backend.fileUrl())
+    // Finder delivers documents through QFileOpenEvent rather than argv.
+    app.setFileOpenHandler([](const QUrl &url) {
+        if (!url.isLocalFile())
             return;
-        backend.open(url);
+        Backend *target = nullptr;
+        for (Backend *window : Backend::liveWindows()) {
+            if (window->parentWindow() && window->parentWindow()->isActive()) {
+                target = window;
+                break;
+            }
+        }
+        if (!target && !Backend::liveWindows().isEmpty())
+            target = Backend::liveWindows().constFirst();
+        if (target)
+            target->open(url);
     });
 
     return app.exec();

@@ -668,7 +668,8 @@ ApplicationWindow {
 
     UnsavedChangesDialog {
         id: unsavedChangesDialog
-            fileName: backend.tabTitle
+        objectName: "unsavedChangesDialog"
+        fileName: backend.tabTitle
         darkMode: win.darkMode
         textScale: win.textScale
         textColor: win.textColor
@@ -833,8 +834,25 @@ ApplicationWindow {
                     }
 
                     MouseArea {
+                        id: tabMouse
+                        objectName: "tabHandle"
                         anchors.fill: parent
+                        preventStealing: true
                         onClicked: backend.setActiveTab(tabDelegate.index)
+                        onReleased: function(mouse) {
+                            var globalPoint = tabMouse.mapToGlobal(mouse.x, mouse.y)
+                            var inStrip = tabList.mapFromItem(tabMouse, mouse.x, mouse.y)
+                            if (inStrip.x >= 0 && inStrip.y >= 0
+                                    && inStrip.x < tabList.width
+                                    && inStrip.y < tabList.height) {
+                                var at = tabList.indexAt(inStrip.x + tabList.contentX, inStrip.y)
+                                if (at >= 0 && at !== tabDelegate.index) {
+                                    backend.moveTab(tabDelegate.index, at)
+                                    return
+                                }
+                            }
+                            backend.finishTabDrag(tabDelegate.index, globalPoint.x, globalPoint.y)
+                        }
                     }
 
                     Row {
@@ -842,6 +860,7 @@ ApplicationWindow {
                         anchors.left: parent.left
                         anchors.leftMargin: 8
                         spacing: 6
+                        z: 1
                         Rectangle {
                             width: 6
                             height: 6

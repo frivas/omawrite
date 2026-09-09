@@ -40,6 +40,7 @@
 
 namespace {
 QList<Backend *> g_liveWindows;
+bool g_sessionWritesFrozen = false;
 }
 
 constexpr qreal typoraLineHeightPercent = 140;
@@ -213,12 +214,17 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 }
 
 Backend::~Backend() {
-    persistSession();
+    if (!g_sessionWritesFrozen)
+        persistSession();
     g_liveWindows.removeAll(this);
 }
 
 void Backend::setParentWindow(QWindow *window) {
     m_parentWindow = window;
+}
+
+QWindow *Backend::parentWindow() const {
+    return m_parentWindow;
 }
 
 QString Backend::fileName() const {
@@ -242,6 +248,33 @@ QString Backend::sessionPath() {
 
 QList<Backend *> Backend::liveWindows() {
     return g_liveWindows;
+}
+
+int Backend::storedWindowCount() {
+    QFile sessionFile(sessionPath());
+    if (!sessionFile.open(QIODevice::ReadOnly))
+        return 0;
+    return QJsonDocument::fromJson(sessionFile.readAll())
+        .object()
+        .value(QStringLiteral("windows"))
+        .toArray()
+        .size();
+}
+
+void Backend::prepareToQuit() {
+    if (!g_liveWindows.isEmpty())
+        g_liveWindows.constFirst()->persistSession();
+    g_sessionWritesFrozen = true;
+}
+
+void Backend::allowSessionWrites() {
+    g_sessionWritesFrozen = false;
+}
+
+bool Backend::isBlankUntitled() const {
+    return m_tabs.size() == 1 && !m_modified
+        && (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
+        && currentDocumentText().trimmed().isEmpty();
 }
 
 void Backend::ensureTab() {
@@ -358,6 +391,7 @@ bool Backend::closeTab(int index) {
     storeTabFields(m_activeTab);
     if (m_tabs.size() == 1) {
         m_tabs.clear();
+        g_liveWindows.removeAll(this);
         persistSession();
         emit closeWindowRequested();
         emit tabsChanged();
@@ -402,6 +436,7 @@ void Backend::adoptTabFrom(QObject *sourceWindow, int index) {
     m_tabs.append(tab);
     source->m_tabs.removeAt(index);
     if (source->m_tabs.isEmpty()) {
+        g_liveWindows.removeAll(source);
         emit source->closeWindowRequested();
     } else {
         if (source->m_activeTab >= source->m_tabs.size())
@@ -416,6 +451,49 @@ void Backend::adoptTabFrom(QObject *sourceWindow, int index) {
     watchCurrentFile();
     persistSession();
     emit tabsChanged();
+}
+
+void Backend::takeDetachedTab(QObject *sourceWindow, int index) {
+    if (isBlankUntitled())
+        m_tabs.clear();
+    adoptTabFrom(sourceWindow, index);
+}
+
+void Backend::moveTab(int from, int to) {
+    if (from == to || from < 0 || to < 0 || from >= m_tabs.size() || to >= m_tabs.size())
+        return;
+    storeTabFields(m_activeTab);
+    m_tabs.move(from, to);
+    if (m_activeTab == from)
+        m_activeTab = to;
+    else if (from < m_activeTab && to >= m_activeTab)
+        --m_activeTab;
+    else if (from > m_activeTab && to <= m_activeTab)
+        ++m_activeTab;
+    persistSession();
+    emit tabsChanged();
+}
+
+void Backend::finishTabDrag(int index, qreal globalX, qreal globalY) {
+    if (index < 0 || index >= m_tabs.size())
+        return;
+    const QPoint point(qRound(globalX), qRound(globalY));
+    Backend *hit = nullptr;
+    for (Backend *window : g_liveWindows) {
+        if (!window->m_parentWindow)
+            continue;
+        if (window->m_parentWindow->geometry().contains(point)) {
+            hit = window;
+            break;
+        }
+    }
+    if (!hit) {
+        emit detachTabRequested(index);
+        return;
+    }
+    if (hit == this)
+        return;
+    hit->adoptTabFrom(this, index);
 }
 
 void Backend::setDarkMode(bool darkMode) {
@@ -1478,8 +1556,7 @@ bool Backend::launchNewInstance(const QString &filePath) {
 }
 
 void Backend::newWindow() {
-    if (!launchNewInstance())
-        setStatus(QStringLiteral("Could not open a new window."));
+    emit newWindowRequested();
 }
 
 QString Backend::clipboardUrl() const {
@@ -1773,6 +1850,8 @@ void Backend::setKnownFileContents(const QByteArray &contents, bool known) {
 }
 
 void Backend::persistSession() {
+    if (g_sessionWritesFrozen)
+        return;
     storeTabFields(m_activeTab);
     QJsonArray windows;
     for (Backend *window : g_liveWindows) {
