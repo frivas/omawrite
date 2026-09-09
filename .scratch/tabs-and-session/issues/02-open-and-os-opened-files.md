@@ -1,6 +1,7 @@
 # Open and OS-opened files
 
 Type: grilling
+Status: claimed
 
 ## Question
 
