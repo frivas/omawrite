@@ -2,6 +2,7 @@
 #include <QFont>
 #include <QColor>
 #include <QQuickItem>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTextBlock>
@@ -43,6 +44,15 @@ private slots:
 
     void init() {
         QSettings().clear();
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QFile::remove(Backend::sessionPath());
+        QDir dir(stateDirectory);
+        const QStringList leftovers = dir.entryList(
+            {QStringLiteral("recovery-*.json"), QStringLiteral("session.json")},
+            QDir::Files);
+        for (const QString &name : leftovers)
+            QFile::remove(dir.filePath(name));
     }
 
     void countsWords() {
@@ -714,14 +724,15 @@ private slots:
         // flag has to survive the write as well as the read. Hand-writing the
         // JSON proves only half of that, and it is the half that cannot lose
         // a file.
-        const QString snapshotPath =
-            QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-                .filePath(QStringLiteral("recovery-0.json"));
+        const QString snapshotPath = Backend::sessionPath();
         QTRY_VERIFY(QFile::exists(snapshotPath));
 
         QFile snapshot(snapshotPath);
         QVERIFY(snapshot.open(QIODevice::ReadOnly));
-        const QJsonObject recovery = QJsonDocument::fromJson(snapshot.readAll()).object();
+        const QJsonObject recovery =
+            QJsonDocument::fromJson(snapshot.readAll()).object()
+                .value(QStringLiteral("windows")).toArray().at(0).toObject()
+                .value(QStringLiteral("tabs")).toArray().at(0).toObject();
         snapshot.close();
         QVERIFY(recovery.contains(QStringLiteral("pathNeverRead")));
         QVERIFY(recovery.value(QStringLiteral("pathNeverRead")).toBool());
@@ -746,6 +757,7 @@ private slots:
         const QString stateDirectory =
             QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QVERIFY(QDir().mkpath(stateDirectory));
+        QFile::remove(Backend::sessionPath());
         QFile snapshot(QDir(stateDirectory).filePath(QStringLiteral("recovery-0.json")));
         QVERIFY(snapshot.open(QIODevice::WriteOnly));
         const QJsonObject recovery{
@@ -1351,7 +1363,9 @@ private slots:
         QFile snapshot(backend.recoveryPath());
         QVERIFY(snapshot.open(QIODevice::ReadOnly));
         const QJsonObject saved =
-            QJsonDocument::fromJson(snapshot.readAll()).object();
+            QJsonDocument::fromJson(snapshot.readAll()).object()
+                .value(QStringLiteral("windows")).toArray().at(0).toObject()
+                .value(QStringLiteral("tabs")).toArray().at(0).toObject();
         QCOMPARE(saved.value(QStringLiteral("text")).toString(),
                  QStringLiteral("a scratch note"));
         QVERIFY(saved.value(QStringLiteral("fileUrl")).toString().isEmpty());
@@ -3013,6 +3027,143 @@ private slots:
         quickDocument->textDocument()->setPlainText(QString());
         QVERIFY(backend.editorTextChanged());
         QVERIFY(backend.modified());
+    }
+
+    void opensASecondDocumentAsATab() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("one.md"));
+        const QString second = directory.filePath(QStringLiteral("two.md"));
+        {
+            QFile a(first);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("alpha");
+            QFile b(second);
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("beta");
+        }
+
+        Backend backend;
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+        QCOMPARE(backend.tabCount(), 1);
+        QCOMPARE(backend.tabTitle(), QStringLiteral("Untitled"));
+
+        backend.open(QUrl::fromLocalFile(first));
+        QCOMPARE(backend.tabCount(), 1);
+        QCOMPARE(backend.fileName(), QStringLiteral("one.md"));
+        QCOMPARE(document->textDocument()->toPlainText(), QStringLiteral("alpha"));
+
+        backend.open(QUrl::fromLocalFile(second));
+        QCOMPARE(backend.tabCount(), 2);
+        QCOMPARE(backend.activeTabIndex(), 1);
+        QCOMPARE(backend.fileName(), QStringLiteral("two.md"));
+        QCOMPARE(document->textDocument()->toPlainText(), QStringLiteral("beta"));
+
+        backend.setActiveTab(0);
+        QCOMPARE(backend.fileName(), QStringLiteral("one.md"));
+        QCOMPARE(document->textDocument()->toPlainText(), QStringLiteral("alpha"));
+    }
+
+    void focusesAnAlreadyOpenPathInsteadOfDuplicatingIt() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("same.md"));
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+            file.write("once");
+        }
+
+        Backend backend;
+        QVERIFY(attachTextEdit(&backend));
+        backend.open(QUrl::fromLocalFile(path));
+        backend.newTab();
+        QCOMPARE(backend.tabCount(), 2);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.tabCount(), 2);
+        QCOMPARE(backend.activeTabIndex(), 0);
+    }
+
+    void numbersUntitledTabsAcrossAWindow() {
+        Backend backend;
+        QVERIFY(attachTextEdit(&backend));
+        QCOMPARE(backend.tabTitle(), QStringLiteral("Untitled"));
+        backend.newTab();
+        QCOMPARE(backend.tabTitle(), QStringLiteral("Untitled 2"));
+        backend.setActiveTab(0);
+        QCOMPARE(backend.tabTitle(), QStringLiteral("Untitled"));
+    }
+
+    void closingTheLastTabAsksTheWindowToClose() {
+        Backend backend;
+        QVERIFY(attachTextEdit(&backend));
+        QSignalSpy closeSpy(&backend, &Backend::closeWindowRequested);
+        QVERIFY(backend.closeTab(0));
+        QCOMPARE(closeSpy.count(), 1);
+        QCOMPARE(backend.tabCount(), 0);
+    }
+
+    void restoresUntitledTabsFromTheSessionFile() {
+        {
+            Backend writer;
+            QQuickTextDocument *document = attachTextEdit(&writer);
+            QVERIFY(document);
+            document->textDocument()->setPlainText(QStringLiteral("still here"));
+            QVERIFY(writer.editorTextChanged());
+            writer.persistSession();
+        }
+
+        Backend reader;
+        QQuickTextDocument *document = attachTextEdit(&reader);
+        QVERIFY(document);
+        QCOMPARE(reader.tabTitle(), QStringLiteral("Untitled"));
+        QCOMPARE(document->textDocument()->toPlainText(), QStringLiteral("still here"));
+        QVERIFY(reader.modified());
+    }
+
+    void movesATabOntoAnotherWindow() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("moved.md"));
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+            file.write("cargo");
+        }
+
+        Backend source;
+        QVERIFY(attachTextEdit(&source));
+        source.open(QUrl::fromLocalFile(path));
+        source.newTab();
+        QCOMPARE(source.tabCount(), 2);
+
+        Backend destination;
+        QVERIFY(attachTextEdit(&destination));
+        destination.adoptTabFrom(&source, 0);
+        QCOMPARE(destination.tabCount(), 2);
+        QCOMPARE(destination.fileName(), QStringLiteral("moved.md"));
+        QCOMPARE(source.tabCount(), 1);
+    }
+
+    void tabStripIsOnTheWritingWindow() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QVERIFY(window->findChild<QQuickItem *>(QStringLiteral("tabStrip")));
+        QCOMPARE(window->property("title").toString(),
+                 QStringLiteral("Untitled - Omawrite"));
+        backend.newTab();
+        QCOMPARE(window->property("title").toString(),
+                 QStringLiteral("Untitled 2 - Omawrite"));
     }
 
 private:

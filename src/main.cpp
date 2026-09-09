@@ -125,13 +125,7 @@ int main(int argc, char *argv[]) {
     app.setFileOpenHandler([&backend](const QUrl &url) {
         if (!url.isLocalFile() || url == backend.fileUrl())
             return;
-        const bool alreadyShowingFile = backend.fileUrl().isValid()
-            && !backend.fileUrl().isEmpty();
-        if (backend.modified() || alreadyShowingFile) {
-            Backend::launchNewInstance(url.toLocalFile());
-        } else {
-            backend.open(url);
-        }
+        backend.open(url);
     });
 
     return app.exec();

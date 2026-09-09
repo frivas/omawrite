@@ -16,7 +16,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: (backend.modified ? "* " : "") + backend.tabTitle + " - Omawrite"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -42,6 +42,7 @@ ApplicationWindow {
     property int searchMatchIndex: -1
     property url pendingOpenUrl
     property string pendingAction: ""
+    property int pendingTabIndex: -1
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
     property bool previewMode: false
@@ -58,23 +59,21 @@ ApplicationWindow {
     color: pageColor
 
     onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
+        backend.persistSession();
+        if (closeConfirmed)
             return;
-
-        close.accepted = false;
-        pendingAction = "close";
-        if (!unsavedChangesDialog.opened)
-            unsavedChangesDialog.open();
+        close.accepted = true;
     }
 
-    function requestOpen(url) {
-        if (!backend.modified) {
-            backend.open(url);
+    function requestCloseTab(index) {
+        var tab = backend.tabs[index];
+        if (tab && tab.dirty) {
+            pendingTabIndex = index;
+            pendingAction = "closeTab";
+            unsavedChangesDialog.open();
             return;
         }
-        pendingOpenUrl = url;
-        pendingAction = "open";
-        unsavedChangesDialog.open();
+        backend.closeTab(index);
     }
 
     // Every text operation returns the whole document plus a caret offset.
@@ -123,6 +122,8 @@ ApplicationWindow {
             close();
         } else if (action === "open") {
             backend.open(pendingOpenUrl);
+        } else if (action === "closeTab") {
+            backend.closeTab(pendingTabIndex);
         }
     }
 
@@ -317,7 +318,21 @@ ApplicationWindow {
         id: newShortcut
         sequences: [StandardKey.New]
         context: Qt.ApplicationShortcut
+        onActivated: backend.newTab()
+    }
+
+    Shortcut {
+        id: newWindowShortcut
+        sequence: "Ctrl+Shift+N"
+        context: Qt.ApplicationShortcut
         onActivated: backend.newWindow()
+    }
+
+    Shortcut {
+        id: closeTabShortcut
+        sequences: [StandardKey.Close]
+        context: Qt.WindowShortcut
+        onActivated: win.requestCloseTab(backend.activeTabIndex)
     }
 
     Shortcut {
@@ -382,6 +397,11 @@ ApplicationWindow {
 
     Connections {
         target: backend
+
+        function onCloseWindowRequested() {
+            win.closeConfirmed = true;
+            win.close();
+        }
 
         function onOpenDialogRequested() {
             openFileDialog.open();
@@ -458,8 +478,13 @@ ApplicationWindow {
             title: "File"
 
             Platform.MenuItem {
-                text: "New Window"
+                text: "New Tab"
                 shortcut: StandardKey.New
+                onTriggered: backend.newTab()
+            }
+            Platform.MenuItem {
+                text: "New Window"
+                shortcut: "Ctrl+Shift+N"
                 onTriggered: backend.newWindow()
             }
             Platform.MenuItem {
@@ -468,6 +493,11 @@ ApplicationWindow {
                 onTriggered: backend.openDialog()
             }
             Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Close Tab"
+                shortcut: StandardKey.Close
+                onTriggered: win.requestCloseTab(backend.activeTabIndex)
+            }
             Platform.MenuItem {
                 text: "Save"
                 shortcut: StandardKey.Save
@@ -638,7 +668,7 @@ ApplicationWindow {
 
     UnsavedChangesDialog {
         id: unsavedChangesDialog
-        fileName: backend.fileName
+            fileName: backend.tabTitle
         darkMode: win.darkMode
         textScale: win.textScale
         textColor: win.textColor
@@ -687,7 +717,9 @@ ApplicationWindow {
             text: saveShortcut.nativeText + "  Save\n"
                 + saveAsShortcut.nativeText + "  Save As\n"
                 + openShortcut.nativeText + "  Open\n"
-                + newShortcut.nativeText + "  New Window\n"
+                + newShortcut.nativeText + "  New Tab\n"
+                + newWindowShortcut.nativeText + "  New Window\n"
+                + closeTabShortcut.nativeText + "  Close Tab\n"
                 + findShortcut.nativeText + "  Find\n"
                 + replaceShortcut.nativeText + "  Find and Replace\n"
                 + boldShortcut.nativeText + "  Bold\n"
@@ -761,10 +793,91 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
 
+        Rectangle {
+            id: tabStrip
+            objectName: "tabStrip"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.max(28, win.scaledSize(28))
+            color: win.pageColor
+
+            ListView {
+                id: tabList
+                objectName: "tabList"
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                orientation: ListView.Horizontal
+                clip: true
+                spacing: 2
+                model: backend.tabs
+                delegate: Item {
+                    id: tabDelegate
+                    required property int index
+                    required property var modelData
+                    width: Math.min(180, Math.max(88, titleLabel.implicitWidth + 36))
+                    height: tabStrip.height
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: tabDelegate.modelData.active ? backend.themeAccent : "transparent"
+                        border.width: 0
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 2
+                            color: tabDelegate.modelData.active ? backend.themeAccent : "transparent"
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: backend.setActiveTab(tabDelegate.index)
+                    }
+
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        spacing: 6
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            visible: tabDelegate.modelData.dirty
+                            color: backend.themeAccent
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            id: titleLabel
+                            text: tabDelegate.modelData.title
+                            color: tabDelegate.modelData.active ? win.textColor : win.mutedColor
+                            font.family: backend.editorFontFamily
+                            font.pixelSize: win.scaledSize(12)
+                            elide: Text.ElideRight
+                            width: Math.min(140, implicitWidth)
+                        }
+                        Text {
+                            text: "×"
+                            color: win.mutedColor
+                            font.pixelSize: win.scaledSize(14)
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -4
+                                onClicked: win.requestCloseTab(tabDelegate.index)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Flickable {
             id: editorFlick
             objectName: "editorViewport"
-            anchors.top: parent.top
+            anchors.top: tabStrip.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: footer.top

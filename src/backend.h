@@ -11,6 +11,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QStringList>
+#include <QVector>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <memory>
 
 class MarkdownHighlighter;
@@ -53,6 +56,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
+    Q_PROPERTY(int tabCount READ tabCount NOTIFY tabsChanged)
+    Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY tabsChanged)
+    Q_PROPERTY(QVariantList tabs READ tabs NOTIFY tabsChanged)
+    Q_PROPERTY(QString tabTitle READ tabTitle NOTIFY tabsChanged)
 
 public:
     // Converts a pixel-sized editor font into the resolution-independent
@@ -182,10 +189,22 @@ public:
     // Whether the debounce may write the document's own file, rather than the
     // recovery snapshot. Exposed so the guardrails can be tested directly.
     bool canAutosaveToFile() const;
+    bool pathNeverRead() const { return m_pathNeverRead; }
 
-    // Where this window's crash snapshot lives. Public so a test can read the
-    // snapshot from the slot this backend actually claimed.
+    // Where the session file lives. Public so tests can read hot-exit state.
+    // recoveryPath is the same path: crash and quit share session.json.
+    static QString sessionPath();
     QString recoveryPath() const;
+
+    int tabCount() const;
+    int activeTabIndex() const { return m_activeTab; }
+    QVariantList tabs() const;
+    QString tabTitle() const;
+    Q_INVOKABLE void newTab();
+    Q_INVOKABLE bool closeTab(int index);
+    Q_INVOKABLE void setActiveTab(int index);
+    Q_INVOKABLE void persistSession();
+    Q_INVOKABLE void adoptTabFrom(QObject *sourceWindow, int index);
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
@@ -239,6 +258,9 @@ signals:
     void autosaveChanged();
     void autosaveDelayMsChanged();
     void themeColorsChanged();
+    void tabsChanged();
+    void closeWindowRequested();
+    void tabCloseNeedsConfirm(int index);
     void closeAfterSave();
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
@@ -292,6 +314,14 @@ private:
     void writeRecovery();
     void restoreRecovery();
     void clearRecovery();
+    void ensureTab();
+    int indexOfLocalPath(const QString &path) const;
+    int nextUntitledNumber() const;
+    QJsonObject sessionObject() const;
+    static void writeSessionFile(const QJsonArray &windows);
+    static QList<Backend *> liveWindows();
+    void loadTabFields(int index);
+    void storeTabFields(int index);
     void setKnownFileContents(const QByteArray &contents, bool known);
     void watchCurrentFile();
     void loadOmarchyTheme();
@@ -341,6 +371,20 @@ private:
     bool m_pathNeverRead = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
+
+    struct DocumentTab {
+        QUrl fileUrl;
+        QString cachedText;
+        bool modified = false;
+        bool pathNeverRead = false;
+        QByteArray lastKnownFileContents;
+        QString lastKnownFileText;
+        bool hasKnownFileContents = false;
+        bool externalChangeUnanswered = false;
+        int untitledNumber = 0;
+    };
+    QVector<DocumentTab> m_tabs;
+    int m_activeTab = 0;
 
     QString m_themeBackground;
     QString m_themeForeground;
