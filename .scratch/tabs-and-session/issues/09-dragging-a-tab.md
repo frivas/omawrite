@@ -16,3 +16,5 @@ The document **moves**. Dropping it on another window **adds it to that windowâ€
 The move itself is `Backend::adoptTabFrom` in [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c), PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59).
 
 The destination strip gains the tab. An empty source emits `closeWindowRequested`. Same path on the destination focuses that tab instead of duplicating. Mouse drag onto another window's strip is not wired in QML yet; the C++ seam is tested by `movesATabOntoAnotherWindow`.
+
+[`3ba8f6e`](https://github.com/frivas/omawrite/commit/3ba8f6ee5389cd31bb71ec345f8b666cfbbad69b) wires the strip: release on another window calls `finishTabDrag`, a drop off every window emits `detachTabRequested` and `takeDetachedTab` so the new strip is just that tab, and a drop on the same strip calls `moveTab`. Tests: `droppingATabOntoAnotherWindowMovesIt`, `droppingATabOffEveryWindowDetachesIt`, `reordersTabsInTheSameWindow`.

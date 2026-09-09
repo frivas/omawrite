@@ -22,3 +22,5 @@ First launch: if `session.json` is missing, import leftover `recovery-*.json` as
 Implemented in [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c), PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59).
 
 `Backend::sessionPath` is `session.json`. Debounce and window teardown write it. `recoveryPath()` is the same file so old snapshot tests still have a place to look. Leftover `recovery-*.json` import on first attach. Tests: `snapshotsUntitledDocumentsInsteadOfSavingThem`, `restoresUntitledTabsFromTheSessionFile`, `writesTheNeverReadPathIntoTheSnapshot`.
+
+[`3ba8f6e`](https://github.com/frivas/omawrite/commit/3ba8f6ee5389cd31bb71ec345f8b666cfbbad69b) restores more than one window from `windows[]`, and `prepareToQuit` writes the full session before backends are destroyed so quit cannot shrink the file to the last window. Tests: `restoresTwoWindowsFromTheSessionFile`, `quittingKeepsEveryWindowInTheSession`.

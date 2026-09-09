@@ -16,3 +16,5 @@ Findings: [`../research/today-document-window-save-recovery.md`](../research/tod
 ## Comments
 
 The replace list from this research is what [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c) (PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59)) actually changed: many tabs per `Backend`, `session.json` instead of `recovery-N.json`, Cmd+N as new tab. Named autosave, never-read, and failed-close guardrails stayed.
+
+[`3ba8f6e`](https://github.com/frivas/omawrite/commit/3ba8f6ee5389cd31bb71ec345f8b666cfbbad69b) finishes the last replace: New Window and a drop off the strip spawn another `Backend` in this process. Launch still restores `storedWindowCount()` windows from `session.json`. Tests: `newWindowAsksForAnotherWritingWindow`, `restoresTwoWindowsFromTheSessionFile`, `quittingKeepsEveryWindowInTheSession`.
