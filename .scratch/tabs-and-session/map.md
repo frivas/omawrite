@@ -20,6 +20,9 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 
 - [Today’s document, window, save, and recovery model](issues/01-today-document-window-save-recovery.md) — One window is one Backend/document/process; named autosave and crash snapshots stay as constraints, process-spawn New Window and crash-slot restore must be replaced.
 - [Open and OS-opened files](issues/02-open-and-os-opened-files.md) — Cmd/Ctrl+O and OS-open add a tab in the current window; launching by opening a file makes that file the first tab.
+- [Closing the last tab](issues/03-closing-the-last-tab.md) — Closing the last tab closes the window; no phantom Untitled tab.
+- [Same path already open](issues/04-same-path-already-open.md) — Open focuses the existing tab (and its window); no second tab on the same path.
+- [Untitled tab titles](issues/06-untitled-tab-titles.md) — Untitled, Untitled 2, …; window title is the active tab’s title, with * if unsaved.
 
 ## Not yet specified
 
