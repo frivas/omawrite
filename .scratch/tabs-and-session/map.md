@@ -24,6 +24,7 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 - [Same path already open](issues/04-same-path-already-open.md) — Open focuses the existing tab (and its window); no second tab on the same path.
 - [Untitled tab titles](issues/06-untitled-tab-titles.md) — Untitled, Untitled 2, …; window title is the active tab’s title, with * if unsaved.
 - [Tab strip](issues/05-tab-strip.md) — Top chrome tabs (prototype variant A): titles, active accent, dirty dot, close on the tab; overflow scrolls.
+- [Session store](issues/07-session-store.md) — One AppData `session.json` for all windows/tabs; text only for unsaved work; replaces `recovery-N.json`.
 
 ## Not yet specified
 
