@@ -16,3 +16,9 @@ The file is a JSON object with `windows[]`. Each window has geometry (replacing 
 Write atomically (`QSaveFile` / equivalent), on the existing debounce and on quit. Autosave-off still writes the session (today autosave-off still snapshots). One application lock (`session.lock`) so two processes cannot clobber it.
 
 First launch: if `session.json` is missing, import leftover `recovery-*.json` as tabs in one window, then stop claiming slots.
+
+## Comments
+
+Implemented in [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c), PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59).
+
+`Backend::sessionPath` is `session.json`. Debounce and window teardown write it. `recoveryPath()` is the same file so old snapshot tests still have a place to look. Leftover `recovery-*.json` import on first attach. Tests: `snapshotsUntitledDocumentsInsteadOfSavingThem`, `restoresUntitledTabsFromTheSessionFile`, `writesTheNeverReadPathIntoTheSnapshot`.

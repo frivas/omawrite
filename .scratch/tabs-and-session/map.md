@@ -29,6 +29,8 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 - [External change with several tabs](issues/08-external-change-with-several-tabs.md) — Dialog and unanswered-change guard belong to the tab whose path changed; switch to that tab; queue if several files change.
 - [Find, print, and preferences vs the active tab](issues/10-find-print-preferences.md) — Document commands hit the active tab; preferences stay app-wide.
 
+Implementation: [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c), PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59). Each ticket's Comments block names what shipped.
+
 ## Not yet specified
 
 - (none — the way to the destination is specified)

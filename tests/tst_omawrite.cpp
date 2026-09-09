@@ -23,6 +23,8 @@
 #include <QQuickTextDocument>
 #include <QQuickWindow>
 #include <QStandardPaths>
+#include <QDir>
+#include <QFile>
 #include <QTextDocument>
 
 #include "backend.h"
