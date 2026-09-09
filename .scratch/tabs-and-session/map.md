@@ -23,11 +23,10 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 - [Closing the last tab](issues/03-closing-the-last-tab.md) — Closing the last tab closes the window; no phantom Untitled tab.
 - [Same path already open](issues/04-same-path-already-open.md) — Open focuses the existing tab (and its window); no second tab on the same path.
 - [Untitled tab titles](issues/06-untitled-tab-titles.md) — Untitled, Untitled 2, …; window title is the active tab’s title, with * if unsaved.
+- [Tab strip](issues/05-tab-strip.md) — Top chrome tabs (prototype variant A): titles, active accent, dirty dot, close on the tab; overflow scrolls.
 
 ## Not yet specified
 
-- How the session is stored on disk (layout vs document bodies; what replaces today’s crash snapshot).
-- External file-change prompts when several tabs (and windows) are open.
 - Dragging a tab into a new window.
 - Whether find, print, and preferences stay strictly scoped to the active document (likely yes; not ticketed until a contradiction appears).
 

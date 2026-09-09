@@ -1,7 +1,7 @@
 # Tab strip
 
 Type: prototype
-Status: claimed
+Status: resolved
 
 ## Question
 
@@ -16,3 +16,7 @@ Throwaway prototype (not production QML): [prototype/tab-strip.html](../prototyp
 - `?variant=C` — Title + overflow menu
 
 Arrow keys and the bottom bar cycle variants. Closing the last tab in the prototype shows the “window would close” empty state.
+
+## Answer
+
+**Variant A — top chrome tabs.** A strip above the editor (below the window chrome): title per tab, accent on the active tab, a dirty dot for unsaved work, close on the tab. Many tabs scroll the strip horizontally rather than switching to a sidebar (B) or a title-only overflow (C). Asset: [prototype/tab-strip.html](../prototype/tab-strip.html)?variant=A.
