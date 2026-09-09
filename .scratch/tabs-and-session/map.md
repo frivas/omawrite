@@ -26,10 +26,12 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 - [Tab strip](issues/05-tab-strip.md) — Top chrome tabs (prototype variant A): titles, active accent, dirty dot, close on the tab; overflow scrolls.
 - [Session store](issues/07-session-store.md) — One AppData `session.json` for all windows/tabs; text only for unsaved work; replaces `recovery-N.json`.
 - [Dragging a tab](issues/09-dragging-a-tab.md) — Drop on another window adds the tab to that strip; a new window gets only that tab; empty source window closes.
+- [External change with several tabs](issues/08-external-change-with-several-tabs.md) — Dialog and unanswered-change guard belong to the tab whose path changed; switch to that tab; queue if several files change.
+- [Find, print, and preferences vs the active tab](issues/10-find-print-preferences.md) — Document commands hit the active tab; preferences stay app-wide.
 
 ## Not yet specified
 
-- Whether find, print, and preferences stay strictly scoped to the active document (likely yes; not ticketed until a contradiction appears).
+- (none — the way to the destination is specified)
 
 ## Out of scope
 
