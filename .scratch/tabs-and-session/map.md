@@ -25,10 +25,10 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 - [Untitled tab titles](issues/06-untitled-tab-titles.md) — Untitled, Untitled 2, …; window title is the active tab’s title, with * if unsaved.
 - [Tab strip](issues/05-tab-strip.md) — Top chrome tabs (prototype variant A): titles, active accent, dirty dot, close on the tab; overflow scrolls.
 - [Session store](issues/07-session-store.md) — One AppData `session.json` for all windows/tabs; text only for unsaved work; replaces `recovery-N.json`.
+- [Dragging a tab](issues/09-dragging-a-tab.md) — Drop on another window adds the tab to that strip; a new window gets only that tab; empty source window closes.
 
 ## Not yet specified
 
-- Dragging a tab into a new window.
 - Whether find, print, and preferences stay strictly scoped to the active document (likely yes; not ticketed until a contradiction appears).
 
 ## Out of scope
