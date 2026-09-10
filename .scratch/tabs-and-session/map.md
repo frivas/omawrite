@@ -29,7 +29,15 @@ Omawrite windows hold tabs. Cmd/Ctrl+S saves the active document. A normal quit 
 - [External change with several tabs](issues/08-external-change-with-several-tabs.md) — Dialog and unanswered-change guard belong to the tab whose path changed; switch to that tab; queue if several files change.
 - [Find, print, and preferences vs the active tab](issues/10-find-print-preferences.md) — Document commands hit the active tab; preferences stay app-wide.
 
-Implementation: [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c), PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59). Each ticket's Comments block names what shipped.
+Implementation: [`ca901ef`](https://github.com/frivas/omawrite/commit/ca901efaf40e088877a84200316dc8d1f710026c), [`3ba8f6e`](https://github.com/frivas/omawrite/commit/3ba8f6ee5389cd31bb71ec345f8b666cfbbad69b), PR [omacom/omawrite#59](https://github.com/omacom/omawrite/pull/59). Each ticket's Comments block names what shipped.
+
+## Status
+
+Shipped on `macos`. The destination above is in the app. Do not open a new wayfinder for tabs and session unless a bug shows up in use.
+
+## Follow-on
+
+- [Assemble this folder](issues/11-assemble-this-folder.md) — File menu collates the named Document's directory into one printable or saveable document. Content-block includes are absorbed once; leftover siblings concatenate in filename order. Unsaved tabs win. Untitled has no folder.
 
 ## Not yet specified
 
