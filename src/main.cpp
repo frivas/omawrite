@@ -73,6 +73,9 @@ int main(int argc, char *argv[]) {
     app.setOrganizationDomain(QStringLiteral("omacom.io"));
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
+#ifdef Q_OS_MACOS
+    QQuickStyle::setStyle(QStringLiteral("macOS"));
+#endif
 
     SystemTheme systemTheme(&app);
 
@@ -87,11 +90,16 @@ int main(int argc, char *argv[]) {
         scaled.setPointSizeF(basePointSize * textScale);
         app.setFont(scaled);
     };
+#ifndef Q_OS_MACOS
     applyInterfaceFont(systemTheme.textScale());
+#endif
 
     std::function<Backend *()> spawnWindow;
     spawnWindow = [&]() -> Backend * {
         auto *backend = new Backend(&app);
+#ifdef Q_OS_MACOS
+        backend->setNativeMacChrome(true);
+#endif
         backend->setDarkMode(systemTheme.darkMode());
         backend->setTextScale(systemTheme.textScale());
 
@@ -129,7 +137,9 @@ int main(int argc, char *argv[]) {
     });
     QObject::connect(&systemTheme, &SystemTheme::textScaleChanged, &app,
                      [applyInterfaceFont](qreal textScale) {
+#ifndef Q_OS_MACOS
         applyInterfaceFont(textScale);
+#endif
         for (Backend *window : Backend::liveWindows())
             window->setTextScale(textScale);
     });

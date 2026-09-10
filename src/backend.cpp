@@ -1,11 +1,14 @@
 #include "backend.h"
 
 #include <QClipboard>
+#include <QCollator>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMarginsF>
+#include <QPageLayout>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -221,6 +224,23 @@ Backend::~Backend() {
 
 void Backend::setParentWindow(QWindow *window) {
     m_parentWindow = window;
+    syncRepresentedFile();
+}
+
+void Backend::setNativeMacChrome(bool nativeMacChrome) {
+    if (m_nativeMacChrome == nativeMacChrome)
+        return;
+    m_nativeMacChrome = nativeMacChrome;
+    emit nativeMacChromeChanged();
+}
+
+void Backend::syncRepresentedFile() {
+    if (!m_parentWindow)
+        return;
+    if (m_fileUrl.isLocalFile() && !m_fileUrl.toLocalFile().isEmpty())
+        m_parentWindow->setFilePath(m_fileUrl.toLocalFile());
+    else
+        m_parentWindow->setFilePath(QString());
 }
 
 QWindow *Backend::parentWindow() const {
@@ -628,8 +648,83 @@ bool Backend::contentBlockOnLine(const QString &line, ContentBlock *block) {
     return true;
 }
 
+namespace {
+
+bool walkContentBlockLines(const QStringList &lines, int i, bool *insideFence) {
+    const QString trimmed = lines.at(i).trimmed();
+    if (trimmed.startsWith(QStringLiteral("```"))
+            || trimmed.startsWith(QStringLiteral("~~~"))) {
+        *insideFence = !*insideFence;
+        return false;
+    }
+    if (*insideFence)
+        return false;
+    const bool aloneAbove = i == 0 || lines.at(i - 1).trimmed().isEmpty();
+    const bool aloneBelow = i + 1 >= lines.size()
+        || lines.at(i + 1).trimmed().isEmpty();
+    return aloneAbove && aloneBelow;
+}
+
+QString liveOrFileText(const QString &canonicalPath, const QString &absolutePath,
+                        const QVariantMap &liveTexts) {
+    if (liveTexts.contains(canonicalPath))
+        return liveTexts.value(canonicalPath).toString();
+    if (!absolutePath.isEmpty() && liveTexts.contains(absolutePath))
+        return liveTexts.value(absolutePath).toString();
+    return {};
+}
+
+QStringList contentBlockIncludePaths(const QString &markdown, const QDir &directory,
+                                      const QString &root) {
+    QStringList names;
+    const QStringList lines = markdown.split(QLatin1Char('\n'));
+    bool insideFence = false;
+    for (int i = 0; i < lines.size(); ++i) {
+        if (!walkContentBlockLines(lines, i, &insideFence))
+            continue;
+        Backend::ContentBlock block;
+        if (!Backend::contentBlockOnLine(lines.at(i), &block))
+            continue;
+        const QString candidate =
+            QFileInfo(directory.filePath(block.path)).canonicalFilePath();
+        if (candidate.isEmpty()
+                || !(candidate == root || candidate.startsWith(root + QLatin1Char('/')))) {
+            continue;
+        }
+        if (!names.contains(block.path))
+            names.append(block.path);
+    }
+    return names;
+}
+
+QStringList contentBlockIncludeCanonicals(const QString &markdown, const QDir &directory,
+                                           const QString &root) {
+    QStringList canonicals;
+    const QStringList lines = markdown.split(QLatin1Char('\n'));
+    bool insideFence = false;
+    for (int i = 0; i < lines.size(); ++i) {
+        if (!walkContentBlockLines(lines, i, &insideFence))
+            continue;
+        Backend::ContentBlock block;
+        if (!Backend::contentBlockOnLine(lines.at(i), &block))
+            continue;
+        const QString candidate =
+            QFileInfo(directory.filePath(block.path)).canonicalFilePath();
+        if (candidate.isEmpty()
+                || !(candidate == root || candidate.startsWith(root + QLatin1Char('/')))) {
+            continue;
+        }
+        if (!canonicals.contains(candidate))
+            canonicals.append(candidate);
+    }
+    return canonicals;
+}
+
+} // namespace
+
 QString Backend::expandContentBlocks(const QString &markdown,
-                                     const QString &documentDirectory) {
+                                     const QString &documentDirectory,
+                                     const QVariantMap &liveTexts) {
     if (documentDirectory.isEmpty() || !markdown.contains(QLatin1Char('.')))
         return markdown;
 
@@ -641,29 +736,15 @@ QString Backend::expandContentBlocks(const QString &markdown,
     QStringList lines = markdown.split(QLatin1Char('\n'));
     bool insideFence = false;
     for (int i = 0; i < lines.size(); ++i) {
-        const QString trimmed = lines.at(i).trimmed();
-        if (trimmed.startsWith(QStringLiteral("```"))
-                || trimmed.startsWith(QStringLiteral("~~~"))) {
-            insideFence = !insideFence;
-            continue;
-        }
-        if (insideFence)
-            continue;
-
-        // The line must stand alone, or a sentence that happens to end in a
-        // filename would be swallowed.
-        const bool aloneAbove = i == 0 || lines.at(i - 1).trimmed().isEmpty();
-        const bool aloneBelow = i + 1 >= lines.size()
-            || lines.at(i + 1).trimmed().isEmpty();
-        if (!aloneAbove || !aloneBelow)
+        if (!walkContentBlockLines(lines, i, &insideFence))
             continue;
 
         ContentBlock block;
         if (!contentBlockOnLine(lines.at(i), &block))
             continue;
 
-        const QString candidate =
-            QFileInfo(directory.filePath(block.path)).canonicalFilePath();
+        const QFileInfo relative(directory.filePath(block.path));
+        const QString candidate = relative.canonicalFilePath();
         // Outside the document's folder, or not there at all: leave the line
         // exactly as the writer typed it.
         if (candidate.isEmpty()
@@ -672,7 +753,10 @@ QString Backend::expandContentBlocks(const QString &markdown,
         }
 
         const QFileInfo info(candidate);
-        if (!info.isFile() || info.size() > maximumEmbeddedBytes)
+        const bool hasLive = liveTexts.contains(candidate)
+            || liveTexts.contains(relative.absoluteFilePath());
+        const QString live = liveOrFileText(candidate, relative.absoluteFilePath(), liveTexts);
+        if (!hasLive && (!info.isFile() || info.size() > maximumEmbeddedBytes))
             continue;
 
         const QString suffix = info.suffix().toLower();
@@ -682,10 +766,13 @@ QString Backend::expandContentBlocks(const QString &markdown,
             continue;
         }
 
-        QFile file(candidate);
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-            continue;
-        const QString contents = QString::fromUtf8(file.readAll());
+        QString contents = live;
+        if (!hasLive) {
+            QFile file(candidate);
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+                continue;
+            contents = QString::fromUtf8(file.readAll());
+        }
 
         QString replacement;
         if (proseExtensions().contains(suffix)) {
@@ -710,6 +797,245 @@ QString Backend::expandContentBlocks(const QString &markdown,
     }
 
     return lines.join(QLatin1Char('\n'));
+}
+
+bool Backend::canAssembleThisFolder() const {
+    if (!m_fileUrl.isLocalFile())
+        return false;
+    return QFileInfo(QFileInfo(m_fileUrl.toLocalFile()).absolutePath()).isDir();
+}
+
+QVariantMap Backend::liveDocumentTexts() const {
+    QVariantMap texts;
+    for (Backend *window : g_liveWindows) {
+        for (int i = 0; i < window->m_tabs.size(); ++i) {
+            const DocumentTab &tab = window->m_tabs.at(i);
+            if (!tab.fileUrl.isLocalFile())
+                continue;
+            QString key = QFileInfo(tab.fileUrl.toLocalFile()).canonicalFilePath();
+            if (key.isEmpty())
+                key = QFileInfo(tab.fileUrl.toLocalFile()).absoluteFilePath();
+            if (key.isEmpty())
+                continue;
+            const QString text = i == window->m_activeTab
+                ? window->currentDocumentText()
+                : tab.cachedText;
+            texts.insert(key, text);
+        }
+    }
+    return texts;
+}
+
+QVariantMap Backend::assembleFolder(const QString &directoryPath,
+                                      const QVariantMap &liveTexts) {
+    QVariantMap result{{QStringLiteral("ok"), false},
+                       {QStringLiteral("markdown"), QString()},
+                       {QStringLiteral("wordCount"), 0},
+                       {QStringLiteral("usesUnsavedWork"), false},
+                       {QStringLiteral("roots"), QVariantList()},
+                       {QStringLiteral("suggestedSaveUrl"), QUrl()},
+                       {QStringLiteral("suggestedPdfUrl"), QUrl()}};
+
+    const QDir directory(directoryPath);
+    const QString root = QDir(directory.absolutePath()).canonicalPath();
+    if (root.isEmpty()) {
+        result.insert(QStringLiteral("error"), QStringLiteral("Could not read the folder."));
+        return result;
+    }
+
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+
+    QFileInfoList entries = directory.entryInfoList(
+        {QStringLiteral("*.md"), QStringLiteral("*.markdown")}, QDir::Files, QDir::NoSort);
+    std::sort(entries.begin(), entries.end(), [&](const QFileInfo &a, const QFileInfo &b) {
+        return collator.compare(a.fileName(), b.fileName()) < 0;
+    });
+
+    struct MarkdownFile {
+        QString fileName;
+        QString canonical;
+        QString text;
+        QStringList includeNames;
+        QStringList includeCanonical;
+        bool fromLive = false;
+    };
+    QVector<MarkdownFile> files;
+
+    for (const QFileInfo &info : entries) {
+        const QString canonical = info.canonicalFilePath();
+        if (canonical.isEmpty())
+            continue;
+
+        const QString live = liveOrFileText(canonical, info.absoluteFilePath(), liveTexts);
+        const bool fromLive = liveTexts.contains(canonical)
+            || liveTexts.contains(info.absoluteFilePath());
+        if (!fromLive && info.size() > maximumEmbeddedBytes) {
+            result.insert(QStringLiteral("error"),
+                          QStringLiteral("%1 is too large to assemble.").arg(info.fileName()));
+            return result;
+        }
+
+        QString text = live;
+        if (!fromLive) {
+            QFile file(canonical);
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                result.insert(QStringLiteral("error"),
+                              QStringLiteral("Could not read %1.").arg(info.fileName()));
+                return result;
+            }
+            text = QString::fromUtf8(file.readAll());
+        }
+
+        MarkdownFile item;
+        item.fileName = info.fileName();
+        item.canonical = canonical;
+        item.text = text;
+        item.includeNames = contentBlockIncludePaths(text, directory, root);
+        item.includeCanonical = contentBlockIncludeCanonicals(text, directory, root);
+        item.fromLive = fromLive;
+        files.append(item);
+    }
+
+    QSet<QString> included;
+    for (const MarkdownFile &item : files) {
+        for (const QString &canonical : item.includeCanonical)
+            included.insert(canonical);
+    }
+
+    QVector<MarkdownFile> roots;
+    for (const MarkdownFile &item : files) {
+        if (!included.contains(item.canonical))
+            roots.append(item);
+    }
+    if (roots.isEmpty())
+        roots = files;
+
+    QStringList pieces;
+    QVariantList rootMaps;
+    bool usesUnsavedWork = false;
+
+    for (const MarkdownFile &item : roots) {
+        pieces << expandContentBlocks(item.text, directory.absolutePath(), liveTexts).trimmed();
+        QVariantMap row{{QStringLiteral("fileName"), item.fileName},
+                        {QStringLiteral("includes"), item.includeNames}};
+        rootMaps.append(row);
+        if (item.fromLive) {
+            QFile disk(item.canonical);
+            QString diskText;
+            if (disk.open(QIODevice::ReadOnly | QIODevice::Text))
+                diskText = QString::fromUtf8(disk.readAll());
+            if (diskText != item.text)
+                usesUnsavedWork = true;
+        }
+        for (const QString &canonical : item.includeCanonical) {
+            if (!liveTexts.contains(canonical))
+                continue;
+            QFile disk(canonical);
+            QString diskText;
+            if (disk.open(QIODevice::ReadOnly | QIODevice::Text))
+                diskText = QString::fromUtf8(disk.readAll());
+            if (diskText != liveTexts.value(canonical).toString())
+                usesUnsavedWork = true;
+        }
+    }
+
+    const QString markdown = pieces.join(QStringLiteral("\n\n"));
+    const QString folderName = QFileInfo(root).fileName();
+    const QString parent = QFileInfo(root).absolutePath();
+    result.insert(QStringLiteral("ok"), true);
+    result.insert(QStringLiteral("markdown"), markdown);
+    result.insert(QStringLiteral("wordCount"), countWords(markdown));
+    result.insert(QStringLiteral("usesUnsavedWork"), usesUnsavedWork);
+    result.insert(QStringLiteral("roots"), rootMaps);
+    result.insert(QStringLiteral("directoryName"), folderName);
+    result.insert(QStringLiteral("suggestedSaveUrl"),
+                 QUrl::fromLocalFile(QDir(parent).filePath(folderName + QStringLiteral(".md"))));
+    result.insert(QStringLiteral("suggestedPdfUrl"),
+                 QUrl::fromLocalFile(QDir(parent).filePath(folderName + QStringLiteral(".pdf"))));
+    return result;
+}
+
+QVariantMap Backend::assembleThisFolder() {
+    if (!canAssembleThisFolder()) {
+        setStatus(QStringLiteral("Save the document first so it has a folder."));
+        return QVariantMap{{QStringLiteral("ok"), false}};
+    }
+
+    QVariantMap result = assembleFolder(
+        QFileInfo(m_fileUrl.toLocalFile()).absolutePath(), liveDocumentTexts());
+    if (!result.value(QStringLiteral("ok")).toBool()) {
+        const QString error = result.value(QStringLiteral("error")).toString();
+        if (!error.isEmpty())
+            setStatus(error);
+    }
+    return result;
+}
+
+bool Backend::saveAssembledMarkdown(const QUrl &url, const QString &markdown) {
+    if (!url.isLocalFile())
+        return false;
+    const QString path = url.toLocalFile();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly))
+        return false;
+    file.write(markdown.toUtf8());
+    if (!file.commit())
+        return false;
+    setStatus(QStringLiteral("Saved %1").arg(QFileInfo(path).fileName()));
+    return true;
+}
+
+bool Backend::saveAssembledPdf(const QUrl &url, const QString &markdown) {
+    if (!url.isLocalFile())
+        return false;
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(url.toLocalFile());
+    printer.setDocName(printJobName(QFileInfo(url.toLocalFile()).fileName()));
+    printRenderedMarkdown(&printer, markdown);
+    if (!QFileInfo::exists(url.toLocalFile()) || QFileInfo(url.toLocalFile()).size() == 0)
+        return false;
+    setStatus(QStringLiteral("Saved %1").arg(QFileInfo(url.toLocalFile()).fileName()));
+    return true;
+}
+
+void Backend::printAssembledMarkdown(const QString &markdown) {
+    if (markdown.isEmpty()) {
+        setStatus(QStringLiteral("There is nothing to print."));
+        return;
+    }
+
+    QPrinter printer(QPrinter::HighResolution);
+    const QString job = canAssembleThisFolder()
+        ? QFileInfo(QFileInfo(m_fileUrl.toLocalFile()).absolutePath()).fileName() + QStringLiteral(".md")
+        : QStringLiteral("Omawrite.md");
+    printer.setDocName(printJobName(job));
+    QPrintDialog dialog(&printer);
+    dialog.setWindowTitle(QStringLiteral("Print assembled folder"));
+    dialog.winId();
+    if (dialog.windowHandle() && m_parentWindow)
+        dialog.windowHandle()->setTransientParent(m_parentWindow);
+    if (dialog.exec() == QDialog::Accepted)
+        printRenderedMarkdown(&printer, markdown);
+}
+
+void Backend::printRenderedMarkdown(QPrinter *printer, const QString &markdown) const {
+    QPageLayout layout = printer->pageLayout();
+    layout.setUnits(QPageLayout::Millimeter);
+    layout.setMargins(QMarginsF(m_printMarginMm, m_printMarginMm,
+                                m_printMarginMm, m_printMarginMm));
+    printer->setPageLayout(layout);
+
+    QTextDocument rendered;
+    QFont printed(m_editorFontFamily);
+    printed.setPointSizeF(m_printFontPointSize);
+    rendered.setDefaultFont(printed);
+    rendered.setMarkdown(markdown);
+    styleRenderedDocument(&rendered, true);
+    rendered.print(printer);
 }
 
 QStringList Backend::bundledFontFamilies() {
@@ -1493,27 +1819,8 @@ void Backend::printDocument() {
     if (dialog.windowHandle() && m_parentWindow)
         dialog.windowHandle()->setTransientParent(m_parentWindow);
 
-    if (dialog.exec() == QDialog::Accepted) {
-        QPageLayout layout = printer.pageLayout();
-        layout.setUnits(QPageLayout::Millimeter);
-        layout.setMargins(QMarginsF(m_printMarginMm, m_printMarginMm,
-                                    m_printMarginMm, m_printMarginMm));
-        printer.setPageLayout(layout);
-
-        QTextDocument rendered;
-        // The face follows the editor so the page reads as what was written,
-        // but the size is the print setting: the editor's pixel size is a
-        // screen measurement, and reading it through the screen's DPI -- 72 on
-        // macOS -- turned a 20px editor into 20pt on paper.
-        QFont printed(m_editorFontFamily);
-        printed.setPointSizeF(m_printFontPointSize);
-        rendered.setDefaultFont(printed);
-        rendered.setMarkdown(renderableDocumentText());
-        // Printing rendered a bare document before this: no paragraph spacing,
-        // no leading, no panel behind code.
-        styleRenderedDocument(&rendered, true);
-        rendered.print(&printer);
-    }
+    if (dialog.exec() == QDialog::Accepted)
+        printRenderedMarkdown(&printer, renderableDocumentText());
 }
 
 QString Backend::enclosingBundlePath(const QString &executableDirPath) {
@@ -1557,6 +1864,13 @@ bool Backend::launchNewInstance(const QString &filePath) {
 
 void Backend::newWindow() {
     emit newWindowRequested();
+}
+
+void Backend::bringAllWindowsToFront() {
+    for (Backend *window : g_liveWindows) {
+        if (window->m_parentWindow)
+            window->m_parentWindow->raise();
+    }
 }
 
 QString Backend::clipboardUrl() const {
@@ -1724,6 +2038,7 @@ void Backend::setFileUrl(const QUrl &url) {
         if (m_fileUrl.isLocalFile() && !m_fileUrl.toLocalFile().isEmpty())
             m_tabs[m_activeTab].untitledNumber = 0;
     }
+    syncRepresentedFile();
     watchCurrentFile();
     emit tabsChanged();
 }

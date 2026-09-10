@@ -16,14 +16,26 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.tabTitle + " - Omawrite"
+    title: backend.nativeMacChrome
+           ? (backend.tabTitle + "[*]")
+           : ((backend.modified ? "* " : "") + backend.tabTitle + " - Omawrite")
+
+    SystemPalette {
+        id: macPalette
+        colorGroup: SystemPalette.Active
+    }
 
     readonly property bool darkMode: backend.darkMode
-    readonly property color pageColor: backend.themeBackground
-    readonly property color textColor: backend.themeForeground
-    readonly property color strongTextColor: backend.themeForeground
-    readonly property color mutedColor: darkMode ? "#909191" : "#aeb1b5"
-    readonly property color selectionFill: backend.themeSelection
+    readonly property color pageColor: backend.nativeMacChrome ? macPalette.window : backend.themeBackground
+    readonly property color textColor: backend.nativeMacChrome ? macPalette.windowText : backend.themeForeground
+    readonly property color strongTextColor: backend.nativeMacChrome ? macPalette.windowText : backend.themeForeground
+    readonly property color mutedColor: backend.nativeMacChrome
+                                          ? macPalette.mid
+                                          : (darkMode ? "#909191" : "#aeb1b5")
+    readonly property color selectionFill: backend.nativeMacChrome ? macPalette.highlight : backend.themeSelection
+    readonly property string chromeFontFamily: backend.nativeMacChrome
+                                                 ? Qt.application.font.family
+                                                 : backend.editorFontFamily
     // The desktop's text size knob (GNOME's text-scaling-factor, which
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around.
@@ -46,6 +58,9 @@ ApplicationWindow {
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
     property bool previewMode: false
+    property string assembleMarkdown: ""
+    property url assembleSuggestedMd
+    property url assembleSuggestedPdf
 
     // Typora parity: Ctrl+/ swaps the source buffer for a rendered view.
     function togglePreview() {
@@ -54,8 +69,19 @@ ApplicationWindow {
             editor.forceActiveFocus();
     }
 
-    Material.theme: darkMode ? Material.Dark : Material.Light
-    Material.accent: backend.themeAccent
+    function openAssembleFolder() {
+        const receipt = backend.assembleThisFolder();
+        if (!receipt.ok)
+            return;
+        assembleMarkdown = receipt.markdown;
+        assembleSuggestedMd = receipt.suggestedSaveUrl;
+        assembleSuggestedPdf = receipt.suggestedPdfUrl;
+        assembleFolderDialog.receipt = receipt;
+        assembleFolderDialog.open();
+    }
+
+    Material.theme: backend.nativeMacChrome ? Material.System : (darkMode ? Material.Dark : Material.Light)
+    Material.accent: backend.nativeMacChrome ? macPalette.highlight : backend.themeAccent
     color: pageColor
 
     onClosing: function(close) {
@@ -70,7 +96,10 @@ ApplicationWindow {
         if (tab && tab.dirty) {
             pendingTabIndex = index;
             pendingAction = "closeTab";
-            unsavedChangesDialog.open();
+            if (backend.nativeMacChrome)
+                unsavedChangesAlert.open();
+            else
+                unsavedChangesDialog.open();
             return;
         }
         backend.closeTab(index);
@@ -350,6 +379,14 @@ ApplicationWindow {
     }
 
     Shortcut {
+        id: assembleFolderShortcut
+        sequence: "Ctrl+Shift+P"
+        context: Qt.ApplicationShortcut
+        enabled: backend.canAssembleThisFolder
+        onActivated: win.openAssembleFolder()
+    }
+
+    Shortcut {
         id: fullscreenShortcut
         sequences: Qt.platform.os === "osx"
             ? ["Ctrl+Meta+F"]
@@ -499,6 +536,11 @@ ApplicationWindow {
                 onTriggered: win.requestCloseTab(backend.activeTabIndex)
             }
             Platform.MenuItem {
+                text: "Close Window"
+                shortcut: "Ctrl+Shift+W"
+                onTriggered: win.close()
+            }
+            Platform.MenuItem {
                 text: "Save"
                 shortcut: StandardKey.Save
                 onTriggered: backend.save()
@@ -514,6 +556,12 @@ ApplicationWindow {
                 shortcut: StandardKey.Print
                 onTriggered: backend.printDocument()
             }
+            Platform.MenuItem {
+                text: "Assemble this folder\u2026"
+                shortcut: "Ctrl+Shift+P"
+                enabled: backend.canAssembleThisFolder
+                onTriggered: win.openAssembleFolder()
+            }
         }
 
         Platform.Menu {
@@ -528,6 +576,27 @@ ApplicationWindow {
                 text: "Redo"
                 shortcut: StandardKey.Redo
                 onTriggered: editor.redo()
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Cut"
+                shortcut: StandardKey.Cut
+                onTriggered: editor.cut()
+            }
+            Platform.MenuItem {
+                text: "Copy"
+                shortcut: StandardKey.Copy
+                onTriggered: editor.copy()
+            }
+            Platform.MenuItem {
+                text: "Paste"
+                shortcut: StandardKey.Paste
+                onTriggered: editor.paste()
+            }
+            Platform.MenuItem {
+                text: "Select All"
+                shortcut: StandardKey.SelectAll
+                onTriggered: editor.selectAll()
             }
             Platform.MenuSeparator {}
             Platform.MenuItem {
@@ -618,6 +687,35 @@ ApplicationWindow {
                 shortcut: fullscreenShortcut.sequence
                 onTriggered: win.toggleFullScreen()
             }
+        }
+
+        Platform.Menu {
+            title: "Window"
+
+            Platform.MenuItem {
+                text: "Minimize"
+                shortcut: StandardKey.Minimize
+                onTriggered: win.showMinimized()
+            }
+            Platform.MenuItem {
+                text: "Zoom"
+                onTriggered: {
+                    if (win.visibility === Window.Maximized)
+                        win.showNormal();
+                    else
+                        win.showMaximized();
+                }
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: "Bring All to Front"
+                onTriggered: backend.bringAllWindowsToFront()
+            }
+        }
+
+        Platform.Menu {
+            title: "Help"
+
             Platform.MenuItem {
                 text: "Keyboard Shortcuts"
                 shortcut: "Ctrl+?"
@@ -666,6 +764,47 @@ ApplicationWindow {
         }
     }
 
+    AssembleFolderDialog {
+        id: assembleFolderDialog
+        darkMode: win.darkMode
+        textColor: win.textColor
+        strongTextColor: win.strongTextColor
+        mutedColor: win.mutedColor
+        fontFamily: backend.editorFontFamily
+        textScale: win.textScale
+        onPrintRequested: backend.printAssembledMarkdown(win.assembleMarkdown)
+        onSaveMarkdownRequested: {
+            assembleMarkdownDialog.selectedFile = win.assembleSuggestedMd;
+            assembleMarkdownDialog.open();
+        }
+        onSavePdfRequested: {
+            assemblePdfDialog.selectedFile = win.assembleSuggestedPdf;
+            assemblePdfDialog.open();
+        }
+    }
+
+    Dialogs.FileDialog {
+        id: assembleMarkdownDialog
+        title: "Save assembled Markdown"
+        fileMode: Dialogs.FileDialog.SaveFile
+        nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
+        onAccepted: {
+            backend.saveAssembledMarkdown(selectedFile, win.assembleMarkdown);
+            assembleFolderDialog.close();
+        }
+    }
+
+    Dialogs.FileDialog {
+        id: assemblePdfDialog
+        title: "Save assembled PDF"
+        fileMode: Dialogs.FileDialog.SaveFile
+        nameFilters: ["PDF files (*.pdf)", "All files (*)"]
+        onAccepted: {
+            backend.saveAssembledPdf(selectedFile, win.assembleMarkdown);
+            assembleFolderDialog.close();
+        }
+    }
+
     UnsavedChangesDialog {
         id: unsavedChangesDialog
         objectName: "unsavedChangesDialog"
@@ -688,6 +827,30 @@ ApplicationWindow {
             backend.save();
         }
         onCancelRequested: win.pendingAction = ""
+    }
+
+    Dialogs.MessageDialog {
+        id: unsavedChangesAlert
+        title: "Unsaved Changes"
+        text: "Do you want to save the changes you made to the document “"
+              + backend.tabTitle + "”?"
+        buttons: Dialogs.MessageDialog.Save | Dialogs.MessageDialog.Discard
+                 | Dialogs.MessageDialog.Cancel
+        onButtonClicked: function(button, role) {
+            switch (button) {
+            case Dialogs.MessageDialog.Save:
+                win.awaitingPendingSave = true;
+                backend.save();
+                break;
+            case Dialogs.MessageDialog.Discard:
+                backend.discardRecovery();
+                win.completePendingAction();
+                break;
+            default:
+                win.pendingAction = "";
+                break;
+            }
+        }
     }
 
     ExternalChangeDialog {
@@ -735,6 +898,7 @@ ApplicationWindow {
                 + zoomOutShortcut.nativeText + "  Decrease text size\n"
                 + zoomResetShortcut.nativeText + "  Reset text size\n"
                 + printShortcut.nativeText + "  Print\n"
+                + assembleFolderShortcut.nativeText + "  Assemble this folder\n"
                 + fullscreenShortcut.nativeText + "  Fullscreen\n"
                 + preferencesShortcut.nativeText + "  Preferences\n"
                 + helpShortcut.nativeText + "  Shortcuts"
@@ -801,7 +965,7 @@ ApplicationWindow {
             anchors.left: parent.left
             anchors.right: parent.right
             height: Math.max(28, win.scaledSize(28))
-            color: win.pageColor
+            color: backend.nativeMacChrome ? macPalette.alternateBase : win.pageColor
 
             ListView {
                 id: tabList
@@ -829,7 +993,9 @@ ApplicationWindow {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             height: 2
-                            color: tabDelegate.modelData.active ? backend.themeAccent : "transparent"
+                            color: tabDelegate.modelData.active
+                                   ? (backend.nativeMacChrome ? macPalette.highlight : backend.themeAccent)
+                                   : "transparent"
                         }
                     }
 
@@ -837,6 +1003,7 @@ ApplicationWindow {
                         id: tabMouse
                         objectName: "tabHandle"
                         anchors.fill: parent
+                        hoverEnabled: true
                         preventStealing: true
                         onClicked: backend.setActiveTab(tabDelegate.index)
                         onReleased: function(mouse) {
@@ -866,15 +1033,15 @@ ApplicationWindow {
                             height: 6
                             radius: 3
                             visible: tabDelegate.modelData.dirty
-                            color: backend.themeAccent
+                            color: backend.nativeMacChrome ? macPalette.highlight : backend.themeAccent
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
                             id: titleLabel
                             text: tabDelegate.modelData.title
                             color: tabDelegate.modelData.active ? win.textColor : win.mutedColor
-                            font.family: backend.editorFontFamily
-                            font.pixelSize: win.scaledSize(12)
+                            font.family: win.chromeFontFamily
+                            font.pixelSize: win.scaledSize(backend.nativeMacChrome ? 13 : 12)
                             elide: Text.ElideRight
                             width: Math.min(140, implicitWidth)
                         }
@@ -882,6 +1049,9 @@ ApplicationWindow {
                             text: "×"
                             color: win.mutedColor
                             font.pixelSize: win.scaledSize(14)
+                            visible: !backend.nativeMacChrome
+                                     || tabMouse.containsMouse
+                                     || tabDelegate.modelData.active
                             MouseArea {
                                 anchors.fill: parent
                                 anchors.margins: -4
@@ -1673,6 +1843,7 @@ ApplicationWindow {
 
                 FooterIconButton {
                     objectName: "saveButton"
+                    visible: !backend.nativeMacChrome
                     iconName: "save"
                     iconColor: win.mutedColor
                     tooltip: "Save"
@@ -1681,6 +1852,7 @@ ApplicationWindow {
 
                 FooterIconButton {
                     objectName: "openButton"
+                    visible: !backend.nativeMacChrome
                     iconName: "open"
                     iconColor: win.mutedColor
                     tooltip: "Open"
@@ -1690,7 +1862,7 @@ ApplicationWindow {
                 Label {
                     text: backend.status
                     color: win.mutedColor
-                    font.family: backend.editorFontFamily
+                    font.family: win.chromeFontFamily
                     font.pixelSize: win.scaledSize(11)
                     visible: text !== ""
                     elide: Text.ElideRight
@@ -1714,15 +1886,15 @@ ApplicationWindow {
 
                 Label {
                     objectName: "wordCountLabel"
-                // With a target set the count becomes progress against it, and
-                // names the draft goal, which is deliberately a quarter longer.
+                    // With a target set the count becomes progress against it, and
+                    // names the draft goal, which is deliberately a quarter longer.
                     text: backend.wordTarget > 0
                         ? backend.wordCount + " / " + backend.wordTarget + " Words  ("
                           + backend.draftTargetFor(backend.wordTarget) + " draft)"
                         : backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
                     color: win.mutedColor
                     opacity: 0.75
-                    font.family: backend.editorFontFamily
+                    font.family: win.chromeFontFamily
                     font.pixelSize: win.scaledSize(11)
                     height: win.scaledSize(16)
                     verticalAlignment: Text.AlignVCenter
@@ -1730,8 +1902,7 @@ ApplicationWindow {
 
                 FooterIconButton {
                     objectName: "previewButton"
-                    // The icon is the action, not the state: a pencil while
-                    // previewing, because that click returns to the source.
+                    visible: !backend.nativeMacChrome
                     iconName: win.previewMode ? "edit" : "preview"
                     iconColor: win.previewMode ? backend.themeAccent : win.mutedColor
                     opacity: win.previewMode ? 0.9 : 0.55
@@ -1757,11 +1928,13 @@ ApplicationWindow {
             rightPadding: 8
             topPadding: 0
             bottomPadding: 0
-            Material.elevation: 8
+            Material.elevation: backend.nativeMacChrome ? 0 : 8
 
             background: Rectangle {
-                radius: 9
-                color: win.darkMode ? "#22221f" : "#fffef2"
+                radius: backend.nativeMacChrome ? 6 : 9
+                color: backend.nativeMacChrome
+                       ? macPalette.base
+                       : (win.darkMode ? "#22221f" : "#fffef2")
             }
 
             RowLayout {

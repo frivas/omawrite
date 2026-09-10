@@ -25,6 +25,8 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
 #include <QTextDocument>
 #include <QWindow>
 #include <QSignalSpy>
@@ -2456,6 +2458,149 @@ private slots:
                     .contains(QStringLiteral("inlined")));
     }
 
+    void assemblesSiblingMarkdownInFilenameOrder() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString root = folder.path();
+        {
+            QFile later(root + QStringLiteral("/02-b.md"));
+            QVERIFY(later.open(QIODevice::WriteOnly | QIODevice::Text));
+            later.write("bravo words\n");
+            QFile earlier(root + QStringLiteral("/01-a.md"));
+            QVERIFY(earlier.open(QIODevice::WriteOnly | QIODevice::Text));
+            earlier.write("alpha words\n");
+        }
+
+        const QVariantMap assembled = Backend::assembleFolder(root);
+        QVERIFY(assembled.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(assembled.value(QStringLiteral("markdown")).toString(),
+                 QStringLiteral("alpha words\n\nbravo words"));
+        QCOMPARE(assembled.value(QStringLiteral("wordCount")).toInt(),
+                 Backend::countWords(QStringLiteral("alpha words"))
+                     + Backend::countWords(QStringLiteral("bravo words")));
+        const QVariantList roots = assembled.value(QStringLiteral("roots")).toList();
+        QCOMPARE(roots.size(), 2);
+        QCOMPARE(roots.at(0).toMap().value(QStringLiteral("fileName")).toString(),
+                 QStringLiteral("01-a.md"));
+        QCOMPARE(roots.at(1).toMap().value(QStringLiteral("fileName")).toString(),
+                 QStringLiteral("02-b.md"));
+        const QString suggested =
+            assembled.value(QStringLiteral("suggestedSaveUrl")).toUrl().toLocalFile();
+        const QString canonicalFolder = QDir(root).canonicalPath();
+        QCOMPARE(QFileInfo(suggested).absolutePath(), QFileInfo(canonicalFolder).absolutePath());
+        QCOMPARE(QFileInfo(suggested).fileName(),
+                 QFileInfo(canonicalFolder).fileName() + QStringLiteral(".md"));
+    }
+
+    void assemblesIncludedChaptersOnceThroughTheMaster() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString root = folder.path();
+        {
+            QFile a(root + QStringLiteral("/01-a.md"));
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("alpha words\n");
+            QFile b(root + QStringLiteral("/02-b.md"));
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("bravo words\n");
+            QFile book(root + QStringLiteral("/book.md"));
+            QVERIFY(book.open(QIODevice::WriteOnly | QIODevice::Text));
+            book.write("01-a.md\n\n02-b.md\n");
+        }
+
+        const QString bookText = QStringLiteral("01-a.md\n\n02-b.md\n");
+        const QVariantMap assembled = Backend::assembleFolder(root);
+        QVERIFY(assembled.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(assembled.value(QStringLiteral("markdown")).toString(),
+                 Backend::expandContentBlocks(bookText, root).trimmed());
+        QCOMPARE(assembled.value(QStringLiteral("markdown")).toString().count(
+                     QStringLiteral("alpha words")),
+                 1);
+        QCOMPARE(assembled.value(QStringLiteral("markdown")).toString().count(
+                     QStringLiteral("bravo words")),
+                 1);
+        const QVariantList roots = assembled.value(QStringLiteral("roots")).toList();
+        QCOMPARE(roots.size(), 1);
+        QCOMPARE(roots.at(0).toMap().value(QStringLiteral("fileName")).toString(),
+                 QStringLiteral("book.md"));
+    }
+
+    void assembleUsesUnsavedTabTextThenDiskAfterReload() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString aPath = folder.filePath(QStringLiteral("01-a.md"));
+        const QString bPath = folder.filePath(QStringLiteral("02-b.md"));
+        {
+            QFile a(aPath);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("disk a\n");
+            QFile b(bPath);
+            QVERIFY(b.open(QIODevice::WriteOnly | QIODevice::Text));
+            b.write("bravo words\n");
+        }
+
+        Backend backend;
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+        backend.open(QUrl::fromLocalFile(aPath));
+        QVERIFY(backend.canAssembleThisFolder());
+        document->textDocument()->setPlainText(QStringLiteral("typed a"));
+        QVERIFY(backend.editorTextChanged());
+
+        const QVariantMap dirty = backend.assembleThisFolder();
+        QVERIFY(dirty.value(QStringLiteral("ok")).toBool());
+        QVERIFY(dirty.value(QStringLiteral("usesUnsavedWork")).toBool());
+        QVERIFY(dirty.value(QStringLiteral("markdown")).toString().contains(
+            QStringLiteral("typed a")));
+        QVERIFY(!dirty.value(QStringLiteral("markdown")).toString().contains(
+            QStringLiteral("disk a")));
+
+        backend.reloadFromDisk();
+        const QVariantMap clean = backend.assembleThisFolder();
+        QVERIFY(clean.value(QStringLiteral("ok")).toBool());
+        QVERIFY(!clean.value(QStringLiteral("usesUnsavedWork")).toBool());
+        QVERIFY(clean.value(QStringLiteral("markdown")).toString().contains(
+            QStringLiteral("disk a")));
+        QVERIFY(!clean.value(QStringLiteral("markdown")).toString().contains(
+            QStringLiteral("typed a")));
+    }
+
+    void untitledDocumentCannotAssembleAFolder() {
+        Backend backend;
+        QVERIFY(attachTextEdit(&backend));
+        QVERIFY(!backend.canAssembleThisFolder());
+        QVERIFY(!backend.assembleThisFolder().value(QStringLiteral("ok")).toBool());
+    }
+
+    void savesAssembledMarkdownAndPdf() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString root = folder.path();
+        {
+            QFile a(root + QStringLiteral("/01-a.md"));
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Text));
+            a.write("alpha words\n");
+        }
+
+        Backend backend;
+        QQuickTextDocument *document = attachTextEdit(&backend);
+        QVERIFY(document);
+        backend.open(QUrl::fromLocalFile(root + QStringLiteral("/01-a.md")));
+
+        const QVariantMap assembled = backend.assembleThisFolder();
+        QVERIFY(assembled.value(QStringLiteral("ok")).toBool());
+        const QString markdown = assembled.value(QStringLiteral("markdown")).toString();
+        const QUrl mdUrl = assembled.value(QStringLiteral("suggestedSaveUrl")).toUrl();
+        QVERIFY(backend.saveAssembledMarkdown(mdUrl, markdown));
+        QFile saved(mdUrl.toLocalFile());
+        QVERIFY(saved.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(saved.readAll()), markdown);
+
+        const QUrl pdfUrl = assembled.value(QStringLiteral("suggestedPdfUrl")).toUrl();
+        QVERIFY(backend.saveAssembledPdf(pdfUrl, markdown));
+        QVERIFY(QFileInfo(pdfUrl.toLocalFile()).size() > 0);
+    }
+
     void showsTheVersionAndCommitInAbout() {
         // Both are baked in at build time, so an unknown here means the build
         // lost track of what it was built from.
@@ -3447,6 +3592,30 @@ private slots:
         QCOMPARE(backend.activeTabIndex(), 1);
         QCOMPARE(backend.fileName(), QStringLiteral("back.md"));
         QVERIFY(root->findChild<QObject *>(QStringLiteral("externalChangeHeading")));
+    }
+
+    void assembleFolderDialogListsTheReceiptOnTheWritingWindow() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString path = folder.filePath(QStringLiteral("01-a.md"));
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+            file.write("alpha words\n");
+        }
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> root(openWritingWindow(&backend, &engine));
+        QVERIFY(root);
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(backend.canAssembleThisFolder());
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openAssembleFolder"));
+        auto *dialog = root->findChild<QObject *>(QStringLiteral("assembleFolderDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QCOMPARE(dialog->property("wordCount").toInt(),
+                 Backend::countWords(QStringLiteral("alpha words")));
     }
 
     void tabStripIsOnTheWritingWindow() {

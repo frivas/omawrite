@@ -21,6 +21,7 @@ class MarkdownHighlighter;
 class QTextDocument;
 class QWindow;
 class QLockFile;
+class QPrinter;
 
 class Backend : public QObject {
     Q_OBJECT
@@ -61,6 +62,8 @@ class Backend : public QObject {
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY tabsChanged)
     Q_PROPERTY(QVariantList tabs READ tabs NOTIFY tabsChanged)
     Q_PROPERTY(QString tabTitle READ tabTitle NOTIFY tabsChanged)
+    Q_PROPERTY(bool nativeMacChrome READ nativeMacChrome NOTIFY nativeMacChromeChanged)
+    Q_PROPERTY(bool canAssembleThisFolder READ canAssembleThisFolder NOTIFY fileUrlChanged)
 
 public:
     // Converts a pixel-sized editor font into the resolution-independent
@@ -103,6 +106,8 @@ public:
     QWindow *parentWindow() const;
     static QList<Backend *> liveWindows();
     static int storedWindowCount();
+    bool nativeMacChrome() const { return m_nativeMacChrome; }
+    void setNativeMacChrome(bool nativeMacChrome);
     // Persist every live window, then ignore destructor writes so tearing
     // windows down one at a time cannot shrink the session to the last one.
     static void prepareToQuit();
@@ -151,7 +156,8 @@ public:
     // resolve inside it and nowhere else, so a document cannot read its way up
     // and out of the folder it was opened from.
     static QString expandContentBlocks(const QString &markdown,
-                                       const QString &documentDirectory);
+                                       const QString &documentDirectory,
+                                       const QVariantMap &liveTexts = {});
 
     // Whether a line is a content block, and what it names. Exposed because
     // the shape of the line is the part worth testing directly.
@@ -240,7 +246,18 @@ public:
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void resetEditorFontSize();
     Q_INVOKABLE void printDocument();
+    // Collate the named Document's folder into one printable Markdown file:
+    // content-block includes are absorbed into their parents; leftover .md
+    // siblings concatenate in filename order. Untitled drafts have no folder.
+    bool canAssembleThisFolder() const;
+    static QVariantMap assembleFolder(const QString &directory,
+                                       const QVariantMap &liveTexts = {});
+    Q_INVOKABLE QVariantMap assembleThisFolder();
+    Q_INVOKABLE bool saveAssembledMarkdown(const QUrl &url, const QString &markdown);
+    Q_INVOKABLE bool saveAssembledPdf(const QUrl &url, const QString &markdown);
+    Q_INVOKABLE void printAssembledMarkdown(const QString &markdown);
     Q_INVOKABLE void newWindow();
+    Q_INVOKABLE void bringAllWindowsToFront();
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE bool editorTextChanged();
@@ -270,6 +287,7 @@ signals:
     void autosaveDelayMsChanged();
     void themeColorsChanged();
     void tabsChanged();
+    void nativeMacChromeChanged();
     void closeWindowRequested();
     void newWindowRequested();
     void detachTabRequested(int index);
@@ -337,8 +355,11 @@ private:
     void storeTabFields(int index);
     void setKnownFileContents(const QByteArray &contents, bool known);
     void watchCurrentFile();
+    void syncRepresentedFile();
     void loadOmarchyTheme();
     void watchOmarchyTheme();
+    void printRenderedMarkdown(QPrinter *printer, const QString &markdown) const;
+    QVariantMap liveDocumentTexts() const;
 
     QUrl m_fileUrl;
     bool m_modified = false;
@@ -371,6 +392,7 @@ private:
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;
+    bool m_nativeMacChrome = false;
     QPointer<MarkdownHighlighter> m_highlighter;
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
